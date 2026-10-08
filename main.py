@@ -199,6 +199,7 @@ async def receber_relatorio_usuario(request: Request):
 
     return {"status": "sucesso", "mensagem": "Relatório atualizado com segurança"}
 
+# Rota principal do painel rigorosamente protegida por autenticação Basic
 @app.get("/api/v1/stats", response_class=HTMLResponse)
 def obter_estatisticas(admin: str = Depends(verificar_admin)):
     ultimas_conexoes_html = ""
@@ -524,7 +525,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
             <header>
                 <div class="header-title">
                     <h1 id="header-title-text">Painel de Monitoramento</h1>
-                    <p id="header-subtitle-text">Gestão de Licenças e Robôs em Tempo Real</p>
+                    <p id="header-subtitle-text">Gestão de Licenças e Robôs em Tempo Real (Admin: {admin})</p>
                 </div>
                 <div class="header-right">
                     <div class="badge-online">ONLINE</div>
@@ -580,7 +581,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                             <div style="margin-top: 25px;">
                                 <h3 style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase;">Versão da API</h3>
                                 <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
-                                    <span>API v2.6 (Persistent Heartbeat)</span>
+                                    <span>API v2.7 (Secure Auth)</span>
                                     <span style="color: var(--accent-green); font-weight: bold;">Estável</span>
                                 </div>
                             </div>
