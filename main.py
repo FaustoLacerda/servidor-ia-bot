@@ -2,11 +2,12 @@ from fastapi import FastAPI, Request, HTTPException
 from datetime import datetime
 import json
 import os
-import requests
+import urllib.request
+import urllib.error
 
 app = FastAPI()
 
-# Caminho para o arquivo de clientes (conforme a sua estrutura existente)
+# Caminho para o arquivo de clientes
 CLIENTES_FILE = "clientes.json"
 
 def carregar_clientes():
@@ -36,14 +37,11 @@ def verificar_licenca(dados: dict, request: Request):
     # Validação do arquivo de clientes local
     clientes = carregar_clientes()
     
-    # Compatibilidade caso o arquivo não exista ou utilize o padrão admin inicial
-    # (Se preferir validar estritamente pelo arquivo clientes.json, ajuste conforme necessário)
     autorizado = False
     if clientes:
         if usuario in clientes and clientes[usuario].get("senha") == senha and clientes[usuario].get("licenca") == licenca:
             autorizado = True
     else:
-        # Fallback de segurança padrão se o clientes.json ainda não estiver populado
         if usuario == "Adm_adm" and licenca == "PROD-ADM-2026":
             autorizado = True
 
@@ -53,14 +51,17 @@ def verificar_licenca(dados: dict, request: Request):
     # Captura do IP do cliente
     ip_cliente = request.client.forwarded_for or request.client.host
     
-    # Consulta de geolocalização leve por IP
+    # Consulta de geolocalização nativa (sem dependência externa)
     cidade_origem = "Desconhecida"
     pais_origem = "Desconhecido"
     try:
-        geo_resposta = requests.get(f"https://ipapi.co/{ip_cliente}/json/", timeout=3).json()
-        if "city" in geo_resposta:
-            cidade_origem = geo_resposta.get("city", "Desconhecida")
-            pais_origem = geo_resposta.get("country_name", "Desconhecido")
+        url = f"https://ipapi.co/{ip_cliente}/json/"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=3) as response:
+            geo_resposta = json.loads(response.read().decode())
+            if "city" in geo_resposta:
+                cidade_origem = geo_resposta.get("city", "Desconhecida")
+                pais_origem = geo_resposta.get("country_name", "Desconhecido")
     except Exception:
         pass
 
@@ -79,7 +80,7 @@ def verificar_licenca(dados: dict, request: Request):
         "data_hora": agora
     })
     
-    # Mantém apenas os últimos 50 registos no histórico para poupar memória
+    # Mantém apenas os últimos 50 registos no histórico
     if len(stats_data["historico_conexoes"]) > 50:
         stats_data["historico_conexoes"].pop(0)
 
@@ -93,12 +94,11 @@ def verificar_licenca(dados: dict, request: Request):
 
 @app.post("/api/v1/experiencia")
 def registrar_experiencia(dados: dict):
-    # Processamento dos dados de experiência enviados pelo MT5
     stats_data["total_experiencias_enviadas"] += 1
     print(f"INFO: TradingServer - Experiência recebida: {dados}")
     return {"status": "registrado", "mensagem": "Experiência absorvida pela IA central."}
 
-# NOVO ENDPOINT DE ESTATÍSTICAS E MONITORIZAÇÃO
+# ENDPOINT DE ESTATÍSTICAS E MONITORIZAÇÃO
 @app.get("/api/v1/stats")
 def obter_estatisticas():
     return {
