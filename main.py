@@ -131,66 +131,11 @@ async def receber_relatorio_usuario(request: Request):
 
     return {"status": "sucesso", "mensagem": "Relatório atualizado com segurança"}
 
-@app.get("/api/v1/relatorios", response_class=HTMLResponse)
-def pagina_relatorios(admin: str = Depends(verificar_admin)):
-    linhas_tabela = ""
-    for usr, info in relatorios_usuarios.items():
-        lucro_liquido = info["lucro_total"] - info["prejuizo_total"]
-        cor_lucro = "#4ade80" if lucro_liquido >= 0 else "#f87171"
-        sinal = "+" if lucro_liquido >= 0 else ""
-        
-        linhas_tabela += f"""
-        <tr>
-            <td>👤 <b>{usr}</b></td>
-            <td>💰 R$ {info['banca_atual']:.2f}</td>
-            <td style="color: {cor_lucro}; font-weight: bold;">{sinal}R$ {lucro_liquido:.2f}</td>
-            <td>✅ {info['operacoes_vencedoras']} / ❌ {info['operacoes_perdedoras']}</td>
-            <td>{info['ultima_atualizacao']}</td>
-        </tr>
-        """
-
-    return f"""
-    <!DOCTYPE html>
-    <html lang="pt">
-    <head>
-        <meta charset="UTF-8">
-        <title>Relatório Confidencial por Usuário</title>
-        <style>
-            body {{ font-family: 'Segoe UI', sans-serif; background-color: #070d1b; color: #f8fafc; padding: 30px; }}
-            table {{ width: 100%; border-collapse: collapse; background: #111c38; border-radius: 8px; overflow: hidden; }}
-            th, td {{ padding: 15px; text-align: left; border-bottom: 1px solid #1e294b; }}
-            th {{ background: #0b1329; color: #94a3b8; }}
-            h1 {{ color: #38bdf8; font-size: 22px; }}
-            .badge-sec {{ background: rgba(74, 222, 128, 0.1); color: #4ade80; padding: 5px 10px; border-radius: 4px; font-size: 12px; }}
-        </style>
-    </head>
-    <body>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <h1>📊 Relatório Confidencial de Desempenho</h1>
-            <span class="badge-sec">🔒 Sessão Segura (Admin: {admin})</span>
-        </div>
-        <table>
-            <thead>
-                <tr>
-                    <th>Utilizador</th>
-                    <th>Capital (Banca Atual)</th>
-                    <th>Lucro / Prejuízo Líquido</th>
-                    <th>Vitórias / Derrotas</th>
-                    <th>Última Atividade</th>
-                </tr>
-            </thead>
-            <tbody>
-                {linhas_tabela if linhas_tabela else '<tr><td colspan="5" style="text-align:center; color:#94a3b8;">Nenhum dado de relatório recebido ainda.</td></tr>'}
-            </tbody>
-        </table>
-    </body>
-    </html>
-    """
-
 @app.get("/api/v1/stats", response_class=HTMLResponse)
-def obter_estatisticas():
+def obter_estatisticas(admin: str = Depends(verificar_admin)):
     ultimas_conexoes_html = ""
     marcadores_js = ""
+    linhas_relatorios_html = ""
     
     centro_lat = -22.9056
     centro_lon = -47.0608
@@ -221,6 +166,21 @@ def obter_estatisticas():
             opacity: 1,
             fillOpacity: 0.95
         }}).addTo(map).bindPopup("<b>Utilizador:</b> {c['usuario']}<br><b>Local:</b> {c['localizacao']}, {c['pais']}<br><b>IP:</b> {c['ip']}");
+        """
+
+    for usr, info in relatorios_usuarios.items():
+        lucro_liquido = info["lucro_total"] - info["prejuizo_total"]
+        cor_lucro = "#4ade80" if lucro_liquido >= 0 else "#f87171"
+        sinal = "+" if lucro_liquido >= 0 else ""
+        
+        linhas_relatorios_html += f"""
+        <tr>
+            <td>👤 <b>{usr}</b></td>
+            <td>💰 R$ {info['banca_atual']:.2f}</td>
+            <td style="color: {cor_lucro}; font-weight: bold;">{sinal}R$ {lucro_liquido:.2f}</td>
+            <td>✅ {info['operacoes_vencedoras']} / ❌ {info['operacoes_perdedoras']}</td>
+            <td>{info['ultima_atualizacao']}</td>
+        </tr>
         """
 
     total_verif = len(stats_data["conexoes_ativas"])
@@ -292,6 +252,7 @@ def obter_estatisticas():
                 margin-bottom: 5px;
                 font-size: 14px;
                 transition: 0.2s;
+                cursor: pointer;
             }}
             .menu-item.active, .menu-item:hover {{
                 background-color: rgba(56, 189, 248, 0.1);
@@ -351,6 +312,14 @@ def obter_estatisticas():
                 display: flex;
                 flex-direction: column;
                 gap: 25px;
+            }}
+            .tab-content {{
+                display: none;
+                flex-direction: column;
+                gap: 25px;
+            }}
+            .tab-content.active {{
+                display: flex;
             }}
             .cards-grid {{
                 display: grid;
@@ -469,17 +438,17 @@ def obter_estatisticas():
                 <i class="fa-solid fa-robot"></i>
                 <h2>SERVIDOR IA</h2>
             </div>
-            <a href="#" class="menu-item active"><i class="fa-solid fa-chart-pie"></i> Visão Geral</a>
-            <a href="#" class="menu-item"><i class="fa-solid fa-globe"></i> Mapa Mundial</a>
-            <a href="#" class="menu-item"><i class="fa-solid fa-network-wired"></i> Conexões</a>
-            <a href="#" class="menu-item"><i class="fa-solid fa-sliders"></i> Estatísticas</a>
+            <div class="menu-item active" onclick="switchTab('visao-geral', this)"><i class="fa-solid fa-chart-pie"></i> Visão Geral</div>
+            <div class="menu-item" onclick="switchTab('relatorios', this)"><i class="fa-solid fa-file-invoice-dollar"></i> Relatórios</div>
+            <div class="menu-item" onclick="switchTab('mapa', this)"><i class="fa-solid fa-globe"></i> Mapa Mundial</div>
+            <div class="menu-item" onclick="switchTab('conexoes', this)"><i class="fa-solid fa-network-wired"></i> Conexões</div>
         </aside>
 
         <main class="main-container">
             <header>
                 <div class="header-title">
-                    <h1>Painel de Monitoramento</h1>
-                    <p>Gestão de Licenças e Robôs em Tempo Real</p>
+                    <h1 id="header-title-text">Painel de Monitoramento</h1>
+                    <p id="header-subtitle-text">Gestão de Licenças e Robôs em Tempo Real</p>
                 </div>
                 <div class="header-right">
                     <div class="badge-online">ONLINE</div>
@@ -490,72 +459,128 @@ def obter_estatisticas():
             </header>
 
             <div class="content">
-                <div class="cards-grid">
-                    <div class="stat-card">
-                        <h3>Licenças Ativas</h3>
-                        <div class="value">{total_verif}</div>
-                        <i class="fa-solid fa-shield-halved"></i>
+                <!-- ABA 1: VISÃO GERAL -->
+                <div id="visao-geral" class="tab-content active">
+                    <div class="cards-grid">
+                        <div class="stat-card">
+                            <h3>Licenças Ativas</h3>
+                            <div class="value">{total_verif}</div>
+                            <i class="fa-solid fa-shield-halved"></i>
+                        </div>
+                        <div class="stat-card">
+                            <h3>Experiências Recebidas</h3>
+                            <div class="value">{total_exp}</div>
+                            <i class="fa-solid fa-flask"></i>
+                        </div>
+                        <div class="stat-card">
+                            <h3>IPs Únicos Conectados</h3>
+                            <div class="value">{total_ips}</div>
+                            <i class="fa-solid fa-users"></i>
+                        </div>
+                        <div class="stat-card">
+                            <h3>Status do Servidor</h3>
+                            <div class="value" style="color: var(--accent-green); font-size: 22px; padding-top: 4px;">OPERACIONAL</div>
+                            <i class="fa-solid fa-server"></i>
+                        </div>
                     </div>
-                    <div class="stat-card">
-                        <h3>Experiências Recebidas</h3>
-                        <div class="value">{total_exp}</div>
-                        <i class="fa-solid fa-flask"></i>
+
+                    <div class="dashboard-grid">
+                        <div class="panel">
+                            <h2><i class="fa-solid fa-earth-americas" style="color: var(--accent-blue);"></i> Conexões no Mundo</h2>
+                            <div id="map"></div>
+                        </div>
+                        
+                        <div class="panel">
+                            <h2><i class="fa-solid fa-chart-bar" style="color: var(--accent-blue);"></i> Distribuição por País</h2>
+                            <div style="margin-top: 10px;">
+                                <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 5px;">
+                                    <span>🇧🇷 Brasil</span>
+                                    <span style="font-weight: bold;">100%</span>
+                                </div>
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar"></div>
+                                </div>
+                            </div>
+                            <div style="margin-top: 25px;">
+                                <h3 style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase;">Versão da API</h3>
+                                <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
+                                    <span>API v2.4 (Secure Reports)</span>
+                                    <span style="color: var(--accent-green); font-weight: bold;">Estável</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="stat-card">
-                        <h3>IPs Únicos Conectados</h3>
-                        <div class="value">{total_ips}</div>
-                        <i class="fa-solid fa-users"></i>
-                    </div>
-                    <div class="stat-card">
-                        <h3>Status do Servidor</h3>
-                        <div class="value" style="color: var(--accent-green); font-size: 22px; padding-top: 4px;">OPERACIONAL</div>
-                        <i class="fa-solid fa-server"></i>
+
+                    <div class="panel">
+                        <h2><i class="fa-solid fa-clock-rotate-left" style="color: var(--accent-blue);"></i> Conexões Recentes</h2>
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>País</th>
+                                        <th>Localização</th>
+                                        <th>Status</th>
+                                        <th>Horário</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {ultimas_conexoes_html if ultimas_conexoes_html else '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">A aguardar conexões...</td></tr>'}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
 
-                <div class="dashboard-grid">
+                <!-- ABA 2: RELATÓRIOS -->
+                <div id="relatorios" class="tab-content">
                     <div class="panel">
-                        <h2><i class="fa-solid fa-earth-americas" style="color: var(--accent-blue);"></i> Conexões no Mundo</h2>
-                        <div id="map"></div>
-                    </div>
-                    
-                    <div class="panel">
-                        <h2><i class="fa-solid fa-chart-bar" style="color: var(--accent-blue);"></i> Distribuição por País</h2>
-                        <div style="margin-top: 10px;">
-                            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 5px;">
-                                <span>🇧🇷 Brasil</span>
-                                <span style="font-weight: bold;">100%</span>
-                            </div>
-                            <div class="progress-bar-container">
-                                <div class="progress-bar"></div>
-                            </div>
-                        </div>
-                        <div style="margin-top: 25px;">
-                            <h3 style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase;">Versão da API</h3>
-                            <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
-                                <span>API v2.4 (Secure Reports)</span>
-                                <span style="color: var(--accent-green); font-weight: bold;">Estável</span>
-                            </div>
+                        <h2><i class="fa-solid fa-file-invoice-dollar" style="color: var(--accent-blue);"></i> Relatório Confidencial de Desempenho por Utilizador</h2>
+                        <div class="table-wrapper" style="margin-top: 10px;">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Utilizador</th>
+                                        <th>Capital (Banca Atual)</th>
+                                        <th>Lucro / Prejuízo Líquido</th>
+                                        <th>Vitórias / Derrotas</th>
+                                        <th>Última Atividade</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {linhas_relatorios_html if linhas_relatorios_html else '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">Nenhum dado de relatório recebido ainda.</td></tr>'}
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
 
-                <div class="panel">
-                    <h2><i class="fa-solid fa-clock-rotate-left" style="color: var(--accent-blue);"></i> Conexões Recentes</h2>
-                    <div class="table-wrapper">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>País</th>
-                                    <th>Localização</th>
-                                    <th>Status</th>
-                                    <th>Horário</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {ultimas_conexoes_html if ultimas_conexoes_html else '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">A aguardar conexões...</td></tr>'}
-                            </tbody>
-                        </table>
+                <!-- ABA 3: MAPA MUNDIAL -->
+                <div id="mapa" class="tab-content">
+                    <div class="panel">
+                        <h2><i class="fa-solid fa-globe" style="color: var(--accent-blue);"></i> Vista Expandida do Mapa Global</h2>
+                        <div id="map-expanded" style="height: 500px; width: 100%; border-radius: 8px; background-color: #070d1b; border: 1px solid var(--border-color);"></div>
+                    </div>
+                </div>
+
+                <!-- ABA 4: CONEXÕES -->
+                <div id="conexoes" class="tab-content">
+                    <div class="panel">
+                        <h2><i class="fa-solid fa-network-wired" style="color: var(--accent-blue);"></i> Registo Completo de Conexões</h2>
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>País</th>
+                                        <th>Localização & IP</th>
+                                        <th>Status</th>
+                                        <th>Horário</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {ultimas_conexoes_html if ultimas_conexoes_html else '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">A aguardar conexões...</td></tr>'}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -569,17 +594,32 @@ def obter_estatisticas():
         <script>
             var map = L.map('map', {{ zoomControl: false, worldCopyJump: true }}).setView([{centro_lat}, {centro_lon}], {zoom});
             L.control.zoom({{ position: 'bottomright' }}).addTo(map);
-            
-            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                attribution: '&copy; OpenStreetMap',
-                maxZoom: 19
-            }}).addTo(map);
+            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{ attribution: '&copy; OpenStreetMap', maxZoom: 19 }}).addTo(map);
+
+            var mapExpanded = L.map('map-expanded', {{ zoomControl: false, worldCopyJump: true }}).setView([{centro_lat}, {centro_lon}], {zoom});
+            L.control.zoom({{ position: 'bottomright' }}).addTo(mapExpanded);
+            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{ attribution: '&copy; OpenStreetMap', maxZoom: 19 }}).addTo(mapExpanded);
 
             {marcadores_js}
 
+            // Inserir os mesmos marcadores no mapa expandido
             setTimeout(function() {{
-                map.invalidateSize();
-            }}, 300);
+                {marcadores_js.replace("addTo(map)", "addTo(mapExpanded)")}
+            }, 100);
+
+            function switchTab(tabId, element) {{
+                document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+                document.querySelectorAll('.menu-item').forEach(item => item.classList.remove('active'));
+                
+                document.getElementById(tabId).classList.add('active');
+                element.classList.add('active');
+
+                // Ajustar tamanho dos mapas ao mudar de aba para evitar bugs visuais do Leaflet
+                setTimeout(function() {{
+                    map.invalidateSize();
+                    mapExpanded.invalidateSize();
+                }, 200);
+            }}
         </script>
     </body>
     </html>
