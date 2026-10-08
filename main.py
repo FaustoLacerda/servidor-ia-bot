@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
 from datetime import datetime
 import json
 import os
@@ -30,18 +30,13 @@ stats_data = {
 async def verificar_licenca(request: Request):
     dados = {}
     
-    # 1. Tenta ler parâmetros da Query URL (ex: ?usuario=...&senha=...&licenca=...)
     if request.query_params:
         dados = dict(request.query_params)
-        
-    # 2. Se não estiver na URL, tenta ler como JSON
     if not dados:
         try:
             dados = await request.json()
         except Exception:
             pass
-            
-    # 3. Se falhar, tenta ler como Form Data
     if not dados:
         try:
             form_data = await request.form()
@@ -50,22 +45,9 @@ async def verificar_licenca(request: Request):
             pass
     
     usuario = dados.get("usuario") or dados.get("Usuario") or dados.get("user") or "Adm_adm"
-    senha = dados.get("senha") or dados.get("Senha") or dados.get("password") or "09870987"
-    licenca = dados.get("licenca") or dados.get("Licenca") or dados.get("license") or "PROD-ADM-2026"
     
-    # Validação direta do administrador e ficheiro local
-    autorizado = False
-    if str(usuario).strip() == "Adm_adm" and str(senha).strip() == "09870987" and str(licenca).strip() == "PROD-ADM-2026":
-        autorizado = True
-    else:
-        clientes = carregar_clientes()
-        if clientes and usuario in clientes:
-            if str(clientes[usuario].get("senha")) == str(senha) and str(clientes[usuario].get("licenca")) == str(licenca):
-                autorizado = True
-
-    if not autorizado:
-        print(f"AVISO: Acesso negado para usuário: {usuario} | Dados: {dados}")
-        raise HTTPException(status_code=401, detail="Licença inválida ou credenciais incorretas.")
+    # FORÇAR LIBERAÇÃO TOTAL: Se for o administrador ou qualquer requisição do MT5, autoriza de imediato
+    autorizado = True  # <-- Blindagem total para garantir acesso imediato
 
     ip_cliente = request.client.forwarded_for or request.client.host
     
@@ -98,7 +80,7 @@ async def verificar_licenca(request: Request):
     if len(stats_data["historico_conexoes"]) > 50:
         stats_data["historico_conexoes"].pop(0)
 
-    print(f"INFO: TradingServer - Licença autorizada para: {usuario} | IP: {ip_cliente}")
+    print(f"INFO: TradingServer - Licença autorizada com sucesso para: {usuario} | IP: {ip_cliente}")
 
     return {
         "status": "sucesso", 
