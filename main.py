@@ -15,15 +15,15 @@ security = HTTPBasic()
 ADMIN_USER = "Adm_Master"
 ADMIN_PASS = "R@oyal0987"
 
-# Ficheiro para persistência de dados (evita perder estado ao reiniciar/fazer deploy)
+# Ficheiros para persistência de dados
 DB_FILE = "dados_servidor.json"
+RELATORIOS_FILE = "dados_relatorios.json"
 
 def carregar_dados():
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, "r", encoding="utf-8") as f:
                 dados = json.load(f)
-                # Converter set de IPs de volta
                 dados["ips_conectados"] = set(dados.get("ips_conectados", []))
                 return dados
         except Exception:
@@ -38,7 +38,6 @@ def carregar_dados():
 
 def salvar_dados():
     dados_para_salvar = stats_data.copy()
-    # Converter set para lista para serialização JSON
     dados_para_salvar["ips_conectados"] = list(stats_data["ips_conectados"])
     try:
         with open(DB_FILE, "w", encoding="utf-8") as f:
@@ -46,8 +45,24 @@ def salvar_dados():
     except Exception:
         pass
 
+def carregar_relatorios():
+    if os.path.exists(RELATORIOS_FILE):
+        try:
+            with open(RELATORIOS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def salvar_relatorios():
+    try:
+        with open(RELATORIOS_FILE, "w", encoding="utf-8") as f:
+            json.dump(relatorios_usuarios, f, ensure_ascii=False, indent=4)
+    except Exception:
+        pass
+
 stats_data = carregar_dados()
-relatorios_usuarios = {}
+relatorios_usuarios = carregar_relatorios()
 
 def verificar_admin(credentials: HTTPBasicCredentials = Depends(security)):
     is_user_ok = secrets.compare_digest(credentials.username, ADMIN_USER)
@@ -119,7 +134,6 @@ async def verificar_licenca(request: Request):
 
 @app.api_route("/api/v1/heartbeat", methods=["POST", "GET"])
 async def heartbeat_robo(request: Request):
-    """Endpoint dedicado para os robôs manterem a conexão ativa e atualizada."""
     dados = {}
     if request.query_params:
         dados = dict(request.query_params)
@@ -197,9 +211,9 @@ async def receber_relatorio_usuario(request: Request):
         user_data["prejuizo_total"] += abs(lucro)
         user_data["operacoes_perdedoras"] += 1
 
+    salvar_relatorios()
     return {"status": "sucesso", "mensagem": "Relatório atualizado com segurança"}
 
-# Rota principal do painel rigorosamente protegida por autenticação Basic
 @app.get("/api/v1/stats", response_class=HTMLResponse)
 def obter_estatisticas(admin: str = Depends(verificar_admin)):
     ultimas_conexoes_html = ""
@@ -581,7 +595,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                             <div style="margin-top: 25px;">
                                 <h3 style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase;">Versão da API</h3>
                                 <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
-                                    <span>API v2.7 (Secure Auth)</span>
+                                    <span>API v2.8 (Persistent Reports)</span>
                                     <span style="color: var(--accent-green); font-weight: bold;">Estável</span>
                                 </div>
                             </div>
