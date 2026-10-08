@@ -1,0 +1,14 @@
+﻿{
+    "Adm_Master": {
+        "senha": "R@oyal0987",
+        "licenca": "PROD-XYZ-2026",
+        "liberado": true,
+        "admin": true
+    },
+    "Adm_adm": {
+        "senha": "09870987",
+        "licenca": "PROD-ADM-2026",
+        "liberado": true,
+        "admin": true
+    }
+}
