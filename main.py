@@ -46,23 +46,29 @@ async def verificar_licenca(request: Request):
     
     usuario = dados.get("usuario") or dados.get("Usuario") or dados.get("user") or "Adm_adm"
     
-    # FORÇAR LIBERAÇÃO TOTAL: Se for o administrador ou qualquer requisição do MT5, autoriza de imediato
-    autorizado = True  # <-- Blindagem total para garantir acesso imediato
+    # Autorização imediata para desbloquear o robô no MT5
+    autorizado = True
 
-    ip_cliente = request.client.forwarded_for or request.client.host
-    
+    # Correção segura para extrair o IP do cliente
+    ip_cliente = request.headers.get("x-forwarded-for")
+    if not ip_cliente and request.client:
+        ip_cliente = request.client.host
+    if not ip_cliente:
+        ip_cliente = "Desconhecido"
+
     cidade_origem = "Desconhecida"
     pais_origem = "Desconhecido"
-    try:
-        url = f"https://ipapi.co/{ip_cliente}/json/"
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=3) as response:
-            geo_resposta = json.loads(response.read().decode())
-            if "city" in geo_resposta:
-                cidade_origem = geo_resposta.get("city", "Desconhecida")
-                pais_origem = geo_resposta.get("country_name", "Desconhecido")
-    except Exception:
-        pass
+    if ip_cliente != "Desconhecido":
+        try:
+            url = f"https://ipapi.co/{ip_cliente}/json/"
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=2) as response:
+                geo_resposta = json.loads(response.read().decode())
+                if "city" in geo_resposta:
+                    cidade_origem = geo_resposta.get("city", "Desconhecida")
+                    pais_origem = geo_resposta.get("country_name", "Desconhecido")
+        except Exception:
+            pass
 
     stats_data["total_verificacoes"] += 1
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
