@@ -15,7 +15,7 @@ security = HTTPBasic()
 ADMIN_USER = "Adm_Master"
 ADMIN_PASS = "R@oyal0987"
 
-# Ficheiro para persistência de dados (evita perder estado ao reiniciar)
+# Ficheiro para persistência de dados (evita perder estado ao reiniciar/fazer deploy)
 DB_FILE = "dados_servidor.json"
 
 def carregar_dados():
@@ -139,12 +139,10 @@ async def heartbeat_robo(request: Request):
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     stats_data["ultima_conexao"] = agora
 
-    # Se o robô já existe nas conexões ativas, apenas atualizamos o horário
     if usuario in stats_data["conexoes_ativas"]:
         stats_data["conexoes_ativas"][usuario]["data_hora"] = agora
         stats_data["conexoes_ativas"][usuario]["ip"] = ip_cliente
     else:
-        # Se não existe (ex: servidor reiniciou), recriamos o registo básico
         stats_data["conexoes_ativas"][usuario] = {
             "usuario": usuario,
             "ip": ip_cliente,
@@ -219,7 +217,6 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
         centro_lon = ultima["lon"]
 
     for c in reversed(lista_conexoes):
-        # Determinar se está online (considera inativo se o último heartbeat tiver mais de 10 minutos)
         try:
             dt_conn = datetime.strptime(c['data_hora'], "%Y-%m-%d %H:%M:%S")
             ativo = datetime.now() - dt_conn < timedelta(minutes=10)
@@ -583,7 +580,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                             <div style="margin-top: 25px;">
                                 <h3 style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase;">Versão da API</h3>
                                 <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
-                                    <span>API v2.5 (Heartbeat Sync)</span>
+                                    <span>API v2.6 (Persistent Heartbeat)</span>
                                     <span style="color: var(--accent-green); font-weight: bold;">Estável</span>
                                 </div>
                             </div>
@@ -705,4 +702,4 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("main:app", host="127.0.0.1", port=port, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
