@@ -69,7 +69,6 @@ async def verificar_licenca(request: Request):
     
     if ip_cliente != "Desconhecido":
         try:
-            # Usando ipapi.co que fornece dados detalhados de região e cidade de forma fiável
             url = f"https://ipapi.co/{ip_cliente}/json/"
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
             with urllib.request.urlopen(req, timeout=3) as response:
@@ -141,7 +140,7 @@ def obter_estatisticas():
         </tr>
         """
         marcadores_js += f"""
-        L.circleMarker([{c['lat']}, {{c['lon']}}], {{
+        L.circleMarker([{c['lat']}, {c['lon']}], {{
             radius: 8,
             fillColor: "#4ade80",
             color: "#fff",
@@ -492,7 +491,6 @@ def obter_estatisticas():
 
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
-            // Inicialização do mapa mundial escuro
             var map = L.map('map', {{ zoomControl: false, worldCopyJump: true }}).setView([{centro_lat}, {centro_lon}], {zoom});
             L.control.zoom({{ position: 'bottomright' }}).addTo(map);
             
@@ -504,10 +502,9 @@ def obter_estatisticas():
 
             {marcadores_js}
 
-            // Garante que o renderizador ajuste perfeitamente o tamanho após o carregamento da página
             setTimeout(function() {{
                 map.invalidateSize();
-            }, 300);
+            }}, 300);
         </script>
     </body>
     </html>
