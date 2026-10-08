@@ -140,16 +140,15 @@ async def verificar_licenca(request: Request):
             "operacoes_vencedoras": 0,
             "operacoes_perdedoras": 0,
             "banca_atual": 1000.00,
-            "saldo_creditos": 50.00,       # Carteira pré-paga inicial de cortesia
-            "comissao_devida": 0.0,        # 5% gerado sobre lucros
-            "status_robo": "ATIVO",        # ATIVO ou BLOQUEADO por falta de saldo
+            "saldo_creditos": 50.00,
+            "comissao_devida": 0.0,
+            "status_robo": "ATIVO",
             "ultima_atualizacao": agora
         }
         salvar_relatorios()
 
     salvar_dados()
 
-    # Verifica se o robô tem saldo para operar
     user_info = relatorios_usuarios[usuario]
     if user_info.get("saldo_creditos", 0) <= 0:
         user_info["status_robo"] = "BLOQUEADO"
@@ -259,19 +258,14 @@ async def receber_relatorio_usuario(request: Request):
     user_data["banca_atual"] = banca
     user_data["ultima_atualizacao"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Lógica de cálculo de lucro, comissão de 5% e desconto automático do pré-pago
     if lucro >= 0:
         user_data["lucro_total"] += lucro
         user_data["operacoes_vencedoras"] += 1
         
-        # Calcula 5% de comissão sobre o lucro obtido
         comissao_trade = lucro * 0.05
         user_data["comissao_devida"] = user_data.get("comissao_devida", 0.0) + comissao_trade
-        
-        # Desconta automaticamente da carteira pré-paga
         user_data["saldo_creditos"] = user_data.get("saldo_creditos", 0.0) - comissao_trade
         
-        # Se o saldo zerar ou ficar negativo, bloqueia o robô
         if user_data["saldo_creditos"] <= 0:
             user_data["status_robo"] = "BLOQUEADO"
     else:
@@ -295,7 +289,6 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
     
     centro_lat = -22.9056
     centro_lon = -47.0608
-    zoom = 11
 
     lista_conexoes = list(stats_data["conexoes_ativas"].values())
 
@@ -571,7 +564,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 align-items: center;
                 gap: 10px;
             }}
-            #map {{
+            #map, #map-expanded {{
                 height: 380px;
                 width: 100%;
                 border-radius: 8px;
@@ -781,7 +774,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 <div id="mapa" class="tab-content">
                     <div class="panel">
                         <h2><i class="fa-solid fa-globe" style="color: var(--accent-blue);"></i> Vista Expandida do Mapa Global</h2>
-                        <div id="map-expanded" style="height: 500px; width: 100%; border-radius: 8px; background-color: #070d1b; border: 1px solid var(--border-color);"></div>
+                        <div id="map-expanded"></div>
                     </div>
                 </div>
 
@@ -809,38 +802,41 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
             </div>
 
             <footer>
-                Servidor IA - Monitor Global de Conexões &copy; 2026
+                Servidor de Licenciamento & Inteligência &bull; Todos os direitos reservados &copy; 2026
             </footer>
         </main>
 
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
-            var map = L.map('map', {{ zoomControl: false, worldCopyJump: true }}).setView([{centro_lat}, {centro_lon}], {zoom});
-            L.control.zoom({{ position: 'bottomright' }}).addTo(map);
-            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{ attribution: '&copy; OpenStreetMap', maxZoom: 19 }}).addTo(map);
-
-            var mapExpanded = L.map('map-expanded', {{ zoomControl: false, worldCopyJump: true }}).setView([{centro_lat}, {centro_lon}], {zoom});
-            L.control.zoom({{ position: 'bottomright' }}).addTo(mapExpanded);
-            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{ attribution: '&copy; OpenStreetMap', maxZoom: 19 }}).addTo(mapExpanded);
-
-            {marcadores_js}
-
-            setTimeout(function() {{
-                {marcadores_js.replace("addTo(map)", "addTo(mapExpanded)")}
-            }}, 200);
-
             function switchTab(tabId, element) {{
                 document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
                 document.querySelectorAll('.menu-item').forEach(item => item.classList.remove('active'));
                 
                 document.getElementById(tabId).classList.add('active');
                 element.classList.add('active');
-
-                setTimeout(function() {{
+                
+                setTimeout(() => {{
                     map.invalidateSize();
                     mapExpanded.invalidateSize();
                 }}, 200);
             }}
+
+            const map = L.map('map').setView([{centro_lat}, {centro_lon}], 11);
+            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                maxZoom: 19
+            }}).addTo(map);
+
+            const mapExpanded = L.map('map-expanded').setView([{centro_lat}, {centro_lon}], 11);
+            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                maxZoom: 19
+            }}).addTo(mapExpanded);
+
+            {marcadores_js}
+            
+            // Replicar marcadores no mapa expandido também
+            setTimeout(() => {{
+                {marcadores_js.replace("addTo(map)", "addTo(mapExpanded)")}
+            }, 100);
         </script>
     </body>
     </html>
@@ -848,5 +844,4 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
     return html_content
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
