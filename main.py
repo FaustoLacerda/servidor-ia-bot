@@ -571,6 +571,9 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 background-color: #070d1b;
                 border: 1px solid var(--border-color);
             }}
+            #map-expanded {{
+                height: 500px;
+            }}
             .leaflet-tile-pane {{
                 filter: brightness(0.65) invert(1) contrast(2.8) hue-rotate(200deg) saturate(1.2);
             }}
@@ -833,10 +836,9 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
 
             {marcadores_js}
             
-            // Replicar marcadores no mapa expandido também
             setTimeout(() => {{
                 {marcadores_js.replace("addTo(map)", "addTo(mapExpanded)")}
-            }, 100);
+            }}, 100);
         </script>
     </body>
     </html>
@@ -844,4 +846,5 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
     return html_content
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
