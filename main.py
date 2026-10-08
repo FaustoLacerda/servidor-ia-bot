@@ -280,6 +280,30 @@ async def receber_relatorio_usuario(request: Request):
         "status_robo": user_data["status_robo"]
     }
 
+# Nova rota para adicionar créditos via painel administrativo
+@app.post("/api/v1/admin/adicionar-credito")
+async def adicionar_credito(request: Request, admin: str = Depends(verificar_admin)):
+    try:
+        dados = await request.json()
+    except Exception:
+        dados = {}
+    
+    usuario = dados.get("usuario")
+    valor = float(dados.get("valor", 0.0))
+
+    if not usuario or usuario not in relatorios_usuarios:
+        raise HTTPException(status_code=404, detail="Utilizador não encontrado.")
+
+    user_data = relatorios_usuarios[usuario]
+    user_data["saldo_creditos"] = user_data.get("saldo_creditos", 0.0) + valor
+    
+    # Se o saldo ficar positivo, reativa o robô automaticamente
+    if user_data["saldo_creditos"] > 0 and user_data["status_robo"] == "BLOQUEADO":
+        user_data["status_robo"] = "ATIVO"
+
+    salvar_relatorios()
+    return {"status": "sucesso", "mensagem": f"Créditos adicionados com sucesso para {usuario}.", "novo_saldo": user_data["saldo_creditos"]}
+
 @app.get("/api/v1/stats", response_class=HTMLResponse)
 def obter_estatisticas(admin: str = Depends(verificar_admin)):
     ultimas_conexoes_html = ""
@@ -369,7 +393,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
             <td>R$ {saldo_cred:.2f}</td>
             <td style="color: #38bdf8; font-weight: bold;">R$ {comissao_gerada:.2f}</td>
             <td><span style="color: {cor_status}; font-weight: bold;">{status_robo}</span></td>
-            <td><button onclick="alert('Funcionalidade de recarga Pix rápida para {usr}')" style="background:#38bdf8; color:#070d1b; border:none; padding:5px 10px; border-radius:4px; cursor:pointer; font-weight:bold;">+ Adicionar Crédito</button></td>
+            <td><button onclick="adicionarCredito('{usr}')" style="background:#38bdf8; color:#070d1b; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-weight:bold;">+ Adicionar Crédito</button></td>
         </tr>
         """
 
@@ -822,6 +846,33 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                     map.invalidateSize();
                     mapExpanded.invalidateSize();
                 }}, 200);
+            }}
+
+            async function adicionarCredito(usuario) {{
+                let valorStr = prompt("Digite o valor de créditos a adicionar para o utilizador " + usuario + " (ex: 50.00):");
+                if (!valorStr) return;
+                let valor = parseFloat(valorStr);
+                if (isNaN(valor) || valor <= 0) {{
+                    alert("Valor inválido!");
+                    return;
+                }}
+
+                try {{
+                    let response = await fetch('/api/v1/admin/adicionar-credito', {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{ usuario: usuario, valor: valor }})
+                    }});
+                    let result = await response.json();
+                    if (response.ok) {{
+                        alert("Sucesso! Novo saldo de créditos: R$ " + result.novo_saldo.toFixed(2));
+                        location.reload();
+                    }} else {{
+                        alert("Erro: " + (result.detail || "Não foi possível adicionar créditos."));
+                    }}
+                }} catch (err) {{
+                    alert("Erro de conexão com o servidor.");
+                }}
             }}
 
             const map = L.map('map').setView([{centro_lat}, {centro_lon}], 11);
