@@ -45,28 +45,31 @@ async def verificar_licenca(request: Request):
             pass
     
     usuario = dados.get("usuario") or dados.get("Usuario") or dados.get("user") or "Adm_adm"
-    
-    # Autorização imediata para desbloquear o robô no MT5
     autorizado = True
 
-    # Correção segura para extrair o IP do cliente
-    ip_cliente = request.headers.get("x-forwarded-for")
-    if not ip_cliente and request.client:
-        ip_cliente = request.client.host
-    if not ip_cliente:
+    # Extrai o primeiro IP válido caso venha numa lista com vírgulas (ex: "45.71.124.41, 172.71...")
+    ip_bruto = request.headers.get("x-forwarded-for")
+    if not ip_bruto and request.client:
+        ip_bruto = request.client.host
+    
+    if ip_bruto:
+        ip_cliente = ip_bruto.split(",")[0].strip()
+    else:
         ip_cliente = "Desconhecido"
 
     cidade_origem = "Desconhecida"
     pais_origem = "Desconhecido"
-    if ip_cliente != "Desconhecido":
+    
+    if ip_cliente != "Desconhecido" and ip_cliente != "127.0.0.1" and ip_cliente != "localhost":
         try:
-            url = f"https://ipapi.co/{ip_cliente}/json/"
+            # Usando ip-api.com que retorna dados detalhados de forma gratuita e rápida
+            url = f"http://ip-api.com/json/{ip_cliente}?fields=status,country,city"
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=2) as response:
+            with urllib.request.urlopen(req, timeout=3) as response:
                 geo_resposta = json.loads(response.read().decode())
-                if "city" in geo_resposta:
+                if geo_resposta.get("status") == "success":
                     cidade_origem = geo_resposta.get("city", "Desconhecida")
-                    pais_origem = geo_resposta.get("country_name", "Desconhecido")
+                    pais_origem = geo_resposta.get("country", "Desconhecido")
         except Exception:
             pass
 
@@ -86,7 +89,7 @@ async def verificar_licenca(request: Request):
     if len(stats_data["historico_conexoes"]) > 50:
         stats_data["historico_conexoes"].pop(0)
 
-    print(f"INFO: TradingServer - Licença autorizada com sucesso para: {usuario} | IP: {ip_cliente}")
+    print(f"INFO: TradingServer - Licença autorizada para: {usuario} | IP: {ip_cliente} | Local: {cidade_origem}, {pais_origem}")
 
     return {
         "status": "sucesso", 
