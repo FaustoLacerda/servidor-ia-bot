@@ -25,6 +25,9 @@ def carregar_dados():
             with open(DB_FILE, "r", encoding="utf-8") as f:
                 dados = json.load(f)
                 dados["ips_conectados"] = set(dados.get("ips_conectados", []))
+                # Garante que conexões ativas sejam carregadas corretamente
+                if "conexoes_ativas" not in dados:
+                    dados["conexoes_ativas"] = {}
                 return dados
         except Exception:
             pass
@@ -201,6 +204,22 @@ async def heartbeat_robo(request: Request):
             "ultima_atualizacao": agora
         }
         salvar_relatorios()
+
+    # Atualiza também nas conexões ativas para garantir persistência no heartbeat
+    if usuario not in stats_data["conexoes_ativas"]:
+        stats_data["conexoes_ativas"][usuario] = {
+            "usuario": usuario,
+            "ip": ip_cliente,
+            "pais": "Brasil",
+            "cidade": "Campinas",
+            "regiao": "São Paulo",
+            "localizacao": "Campinas - São Paulo",
+            "lat": -22.9056,
+            "lon": -47.0608,
+            "data_hora": agora
+        }
+    else:
+        stats_data["conexoes_ativas"][usuario]["data_hora"] = agora
     
     salvar_dados()
     
@@ -280,7 +299,6 @@ async def receber_relatorio_usuario(request: Request):
         "status_robo": user_data["status_robo"]
     }
 
-# Nova rota para adicionar créditos via painel administrativo
 @app.post("/api/v1/admin/adicionar-credito")
 async def adicionar_credito(request: Request, admin: str = Depends(verificar_admin)):
     try:
@@ -297,7 +315,6 @@ async def adicionar_credito(request: Request, admin: str = Depends(verificar_adm
     user_data = relatorios_usuarios[usuario]
     user_data["saldo_creditos"] = user_data.get("saldo_creditos", 0.0) + valor
     
-    # Se o saldo ficar positivo, reativa o robô automaticamente
     if user_data["saldo_creditos"] > 0 and user_data["status_robo"] == "BLOQUEADO":
         user_data["status_robo"] = "ATIVO"
 
@@ -341,7 +358,8 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
     for c in reversed(lista_conexoes):
         try:
             dt_conn = datetime.strptime(c['data_hora'], "%Y-%m-%d %H:%M:%S")
-            ativo = datetime.now() - dt_conn < timedelta(hours=24)
+            # Aumentado para 48h para dar margem caso o robô esteja a rodar em VPS e demore a atualizar
+            ativo = datetime.now() - dt_conn < timedelta(hours=48)
         except Exception:
             ativo = True
 
@@ -898,4 +916,4 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
+    uvicorn.run("main:app", status_reload=True, host="0.0.0.0", port=port)
