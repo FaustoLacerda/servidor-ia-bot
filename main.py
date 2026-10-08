@@ -49,7 +49,11 @@ def carregar_relatorios():
     if os.path.exists(RELATORIOS_FILE):
         try:
             with open(RELATORIOS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                dados_Carregados = json.load(f)
+                # Remove limpezas antigas caso tenham ficado registadas como "Desconhecido"
+                if "Desconhecido" in dados_Carregados:
+                    del dados_Carregados["Desconhecido"]
+                return dados_Carregados
         except Exception:
             pass
     return {}
@@ -125,7 +129,6 @@ async def verificar_licenca(request: Request):
         "data_hora": agora
     }
 
-    # Garante que o utilizador verificado também apareça automaticamente nos relatórios
     if usuario not in relatorios_usuarios:
         relatorios_usuarios[usuario] = {
             "usuario": usuario,
@@ -133,7 +136,7 @@ async def verificar_licenca(request: Request):
             "prejuizo_total": 0.0,
             "operacoes_vencedoras": 0,
             "operacoes_perdedoras": 0,
-            "banca_atual": 1000.00,  # Banca inicial padrão
+            "banca_atual": 1000.00,
             "ultima_atualizacao": agora
         }
         salvar_relatorios()
@@ -211,9 +214,13 @@ async def receber_relatorio_usuario(request: Request):
     except Exception:
         dados = {}
 
-    usuario = dados.get("usuario") or "Desconhecido"
+    # Validação rigorosa para impedir utilizadores desconhecidos
+    usuario = dados.get("usuario") or dados.get("Usuario") or dados.get("user")
+    if not usuario or usuario == "Desconhecido":
+        usuario = "Adm_adm"
+
     lucro = float(dados.get("lucro", 0.0))
-    banca = float(dados.get("banca", 0.0))
+    banca = float(dados.get("banca", 1000.0))
 
     if usuario not in relatorios_usuarios:
         relatorios_usuarios[usuario] = {
@@ -252,7 +259,6 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
 
     lista_conexoes = list(stats_data["conexoes_ativas"].values())
 
-    # Sincronização automática de relatórios com base nos robôs conectados ativos
     for c in lista_conexoes:
         usr = c["usuario"]
         if usr not in relatorios_usuarios:
