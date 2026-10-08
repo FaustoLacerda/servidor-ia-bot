@@ -8,7 +8,7 @@ app = FastAPI()
 
 security = HTTPBasic()
 
-# Novas credenciais de Administrador exclusivas para o seu acesso
+# Credenciais de Administrador para o seu acesso restrito
 ADMIN_USER = "Adm_Master"
 ADMIN_PASS = "R@oyal0987"
 
@@ -28,7 +28,7 @@ stats_data = {
     "total_experiencias_enviadas": 0,
     "ultima_conexao": None,
     "ips_conectados": set(),
-    "conexoes_ativas": {}  # Dicionário único por utilizador para evitar duplicações
+    "conexoes_ativas": {}
 }
 
 # Armazenamento seguro de relatórios por usuário
@@ -37,7 +37,6 @@ relatorios_usuarios = {}
 @app.api_route("/api/v1/verificar-licenca", methods=["GET", "POST"])
 async def verificar_licenca(request: Request):
     dados = {}
-    
     if request.query_params:
         dados = dict(request.query_params)
     if not dados:
@@ -533,7 +532,7 @@ def obter_estatisticas():
                         <div style="margin-top: 25px;">
                             <h3 style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase;">Versão da API</h3>
                             <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
-                                <span>API v2.3 (Secure Admin)</span>
+                                <span>API v2.4 (Secure Reports)</span>
                                 <span style="color: var(--accent-green); font-weight: bold;">Estável</span>
                             </div>
                         </div>
