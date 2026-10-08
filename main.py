@@ -185,7 +185,7 @@ async def receber_relatorio_usuario(request: Request):
     except Exception:
         dados = {}
 
-    usuario = dados.get("usuario") or "Desconhecido"
+    usuario = dados.get("usuario") or dados.get("Desconhecido")
     lucro = float(dados.get("lucro", 0.0))
     banca = float(dados.get("banca", 0.0))
 
@@ -234,12 +234,13 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
     for c in reversed(lista_conexoes):
         try:
             dt_conn = datetime.strptime(c['data_hora'], "%Y-%m-%d %H:%M:%S")
-            ativo = datetime.now() - dt_conn < timedelta(minutes=10)
+            # Tolerância de 24 horas para considerar o robô ativo no painel
+            ativo = datetime.now() - dt_conn < timedelta(hours=24)
         except Exception:
             ativo = True
 
         status_cor = "#4ade80" if ativo else "#94a3b8"
-        status_txt = "Online" if ativo else "Inativo / Ausente"
+        status_txt = "Online" if ativo else "Inativo"
 
         ultimas_conexoes_html += f"""
         <tr>
@@ -595,7 +596,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                             <div style="margin-top: 25px;">
                                 <h3 style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase;">Versão da API</h3>
                                 <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
-                                    <span>API v2.8 (Persistent Reports)</span>
+                                    <span>API v2.9 (Persistent Fix)</span>
                                     <span style="color: var(--accent-green); font-weight: bold;">Estável</span>
                                 </div>
                             </div>
