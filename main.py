@@ -47,30 +47,38 @@ async def verificar_licenca(request: Request):
     usuario = dados.get("usuario") or dados.get("Usuario") or dados.get("user") or "Adm_adm"
     autorizado = True
 
-    # Extrai o primeiro IP válido caso venha numa lista com vírgulas (ex: "45.71.124.41, 172.71...")
+    # Recolhe o cabeçalho bruto de IPs
     ip_bruto = request.headers.get("x-forwarded-for")
     if not ip_bruto and request.client:
         ip_bruto = request.client.host
-    
+
+    ip_cliente = "Desconhecido"
     if ip_bruto:
-        ip_cliente = ip_bruto.split(",")[0].strip()
-    else:
-        ip_cliente = "Desconhecido"
+        # Divide por vírgulas e procura o primeiro IP que não seja privado/interno
+        lista_ips = [ip.strip() for ip in ip_bruto.split(",")]
+        for ip in lista_ips:
+            if ip and not ip.startswith(("10.", "192.168.", "127.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.")):
+                ip_cliente = ip
+                break
+        # Se todos forem privados, pega o primeiro da lista por segurança
+        if ip_cliente == "Desconhecido" and lista_ips:
+            ip_cliente = lista_ips[0]
 
     cidade_origem = "Desconhecida"
     pais_origem = "Desconhecido"
     
-    if ip_cliente != "Desconhecido" and ip_cliente != "127.0.0.1" and ip_cliente != "localhost":
+    if ip_cliente != "Desconhecido":
         try:
-            # Usando ip-api.com que retorna dados detalhados de forma gratuita e rápida
             url = f"http://ip-api.com/json/{ip_cliente}?fields=status,country,city"
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
             with urllib.request.urlopen(req, timeout=3) as response:
                 geo_resposta = json.loads(response.read().decode())
+                print(f"DEBUG GEO API ({ip_cliente}): {geo_resposta}")
                 if geo_resposta.get("status") == "success":
                     cidade_origem = geo_resposta.get("city", "Desconhecida")
                     pais_origem = geo_resposta.get("country", "Desconhecido")
-        except Exception:
+        except Exception as e:
+            print(f"ERRO GEO API: {e}")
             pass
 
     stats_data["total_verificacoes"] += 1
@@ -89,7 +97,7 @@ async def verificar_licenca(request: Request):
     if len(stats_data["historico_conexoes"]) > 50:
         stats_data["historico_conexoes"].pop(0)
 
-    print(f"INFO: TradingServer - Licença autorizada para: {usuario} | IP: {ip_cliente} | Local: {cidade_origem}, {pais_origem}")
+    print(f"INFO: TradingServer - Licença autorizada para: {usuario} | IP Selecionado: {ip_cliente} | Local: {cidade_origem}, {pais_origem}")
 
     return {
         "status": "sucesso", 
