@@ -8,23 +8,12 @@ import urllib.error
 
 app = FastAPI()
 
-CLIENTES_FILE = "clientes.json"
-
-def carregar_clientes():
-    if not os.path.exists(CLIENTES_FILE):
-        return {}
-    try:
-        with open(CLIENTES_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
 stats_data = {
     "total_verificacoes": 0,
     "total_experiencias_enviadas": 0,
     "ultima_conexao": None,
     "ips_conectados": set(),
-    "conexoes_ativas": {}  # Dicionário para controlar utilizadores únicos e evitar duplicação
+    "conexoes_ativas": {}  # Dicionário único por utilizador para evitar duplicação
 }
 
 @app.api_route("/api/v1/verificar-licenca", methods=["GET", "POST"])
@@ -47,14 +36,12 @@ async def verificar_licenca(request: Request):
     
     usuario = dados.get("usuario") or dados.get("Usuario") or dados.get("user") or "Adm_adm"
 
-    # Captura opcional de dados detalhados enviados pelo cliente
     rua = dados.get("rua") or dados.get("address") or ""
     bairro = dados.get("bairro") or dados.get("neighborhood") or ""
     cidade_env = dados.get("cidade") or dados.get("city")
     regiao_env = dados.get("regiao") or dados.get("region")
     pais_env = dados.get("pais") or dados.get("country")
     
-    # Captura de coordenadas exatas enviadas pelo robô (com fallback para valores padrão se ausentes)
     lat = dados.get("latitude") or dados.get("lat")
     lon = dados.get("longitude") or dados.get("lon")
 
@@ -72,58 +59,61 @@ async def verificar_licenca(request: Request):
         if ip_cliente == "Desconhecido" and lista_ips:
             ip_cliente = lista_ips[0]
 
-    cidade_origem = cidade_env or "Campinas"
+    cidade_origem = cidade_env or "São Paulo"
     regiao_origem = regiao_env or "São Paulo"
     pais_origem = pais_env or "Brasil"
     
-    if not lat or not lon:
-        lat = -22.9056
-        lon = -47.0608
-        if ip_cliente != "Desconhecido":
-            try:
-                url = f"https://ipapi.co/{ip_cliente}/json/"
-                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req, timeout=3) as response:
-                    geo = json.loads(response.read().decode())
-                    if "error" not in geo:
-                        if not cidade_env:
-                            cidade_origem = geo.get("city", "Campinas")
-                        if not regiao_env:
-                            regiao_origem = geo.get("region", "São Paulo")
-                        if not pais_env:
-                            pais_origem = geo.get("country_name", "Brasil")
-                        lat = float(geo.get("latitude", -22.9056))
-                        lon = float(geo.get("longitude", -47.0608))
-            except Exception:
-                pass
+    resolved_lat = None
+    resolved_lon = None
+
+    # Deteta a geolocalização real baseada no IP público para posicionar corretamente no mapa
+    if ip_cliente != "Desconhecido" and ip_cliente not in ["127.0.0.1", "localhost"]:
+        try:
+            url = f"https://ipapi.co/{ip_cliente}/json/"
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=3) as response:
+                geo = json.loads(response.read().decode())
+                if "error" not in geo:
+                    if not cidade_env:
+                        cidade_origem = geo.get("city", cidade_origem)
+                    if not regiao_env:
+                        regiao_origem = geo.get("region", regiao_origem)
+                    if not pais_env:
+                        pais_origem = geo.get("country_name", pais_origem)
+                    resolved_lat = float(geo.get("latitude"))
+                    resolved_lon = float(geo.get("longitude"))
+        except Exception:
+            pass
+
+    if resolved_lat is not None and resolved_lon is not None:
+        lat = resolved_lat
+        lon = resolved_lon
+    elif lat is not None and lon is not None:
+        try:
+            lat = float(lat)
+            lon = float(lon)
+        except:
+            lat = -23.5505
+            lon = -46.6333
     else:
-        lat = float(lat)
-        lon = float(lon)
+        lat = -23.5505
+        lon = -46.6333
 
     stats_data["total_verificacoes"] += 1
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     stats_data["ultima_conexao"] = agora
     stats_data["ips_conectados"].add(ip_cliente)
     
-    detalhes_extra = []
-    if rua:
-        detalhes_extra.append(f"Rua: {rua}")
-    if bairro:
-        detalhes_extra.append(f"Bairro: {bairro}")
-    
     base_loc = f"{cidade_origem} - {regiao_origem}"
-    localizacao_completa = f"{base_loc} ({' | '.join(detalhes_extra)})" if detalhes_extra else base_loc
     
-    # REGISTRO ÚNICO POR UTILIZADOR (Evita duplicação de licenças e acessos no painel)
+    # Controlo único por utilizador para eliminar a duplicação no painel
     stats_data["conexoes_ativas"][usuario] = {
         "usuario": usuario,
         "ip": ip_cliente,
         "pais": pais_origem,
         "cidade": cidade_origem,
         "regiao": regiao_origem,
-        "rua": rua,
-        "bairro": bairro,
-        "localizacao": localizacao_completa,
+        "localizacao": base_loc,
         "lat": lat,
         "lon": lon,
         "data_hora": agora
@@ -131,8 +121,8 @@ async def verificar_licenca(request: Request):
 
     return {
         "status": "sucesso", 
-        "mensagem": "Licença validada e localização registada com sucesso",
-        "localizacao": f"{pais_origem}, {localizacao_completa}"
+        "mensagem": "Licença validada e geolocalização sincronizada",
+        "localizacao": f"{pais_origem}, {base_loc}"
     }
 
 @app.api_route("/api/v1/experiencia", methods=["GET", "POST"])
@@ -145,8 +135,8 @@ def obter_estatisticas():
     ultimas_conexoes_html = ""
     marcadores_js = ""
     
-    centro_lat = -22.9056
-    centro_lon = -47.0608
+    centro_lat = -23.5505
+    centro_lon = -46.6333
     zoom = 4
 
     lista_conexoes = list(stats_data["conexoes_ativas"].values())
@@ -155,7 +145,7 @@ def obter_estatisticas():
         ultima = lista_conexoes[-1]
         centro_lat = ultima["lat"]
         centro_lon = ultima["lon"]
-        zoom = 12  # Zoom mais próximo para destacar a localização exata no mapa
+        zoom = 12
 
     for c in reversed(lista_conexoes):
         ultimas_conexoes_html += f"""
@@ -166,10 +156,9 @@ def obter_estatisticas():
             <td>{c['data_hora']}</td>
         </tr>
         """
-        # Adiciona o marcador dinâmico utilizando a latitude e longitude exatas recebidas do bot
         marcadores_js += f"""
         L.circleMarker([{c['lat']}, {c['lon']}], {{
-            radius: 10,
+            radius: 12,
             fillColor: "#4ade80",
             color: "#ffffff",
             weight: 2,
@@ -178,7 +167,7 @@ def obter_estatisticas():
         }}).addTo(map).bindPopup("<b>Utilizador:</b> {c['usuario']}<br><b>Local:</b> {c['localizacao']}, {c['pais']}<br><b>IP:</b> {c['ip']}");
         """
 
-    total_verif = len(stats_data["conexoes_ativas"])  # Licenças ativas reais baseadas em utilizadores únicos
+    total_verif = len(stats_data["conexoes_ativas"])
     total_exp = stats_data["total_experiencias_enviadas"]
     total_ips = len(stats_data["ips_conectados"])
     ultima_conn = stats_data["ultima_conexao"] or "Nenhuma"
@@ -430,7 +419,7 @@ def obter_estatisticas():
             <a href="#" class="menu-item"><i class="fa-solid fa-sliders"></i> Estatísticas</a>
         </aside>
 
-        <div class="main-container">
+        <main class="main-container">
             <header>
                 <div class="header-title">
                     <h1>Painel de Monitoramento</h1>
@@ -518,7 +507,7 @@ def obter_estatisticas():
             <footer>
                 Servidor IA - Monitor Global de Conexões &copy; 2026
             </footer>
-        </div>
+        </main>
 
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
