@@ -3,6 +3,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 import secrets
 from datetime import datetime
+import uvicorn
 
 app = FastAPI()
 
@@ -31,7 +32,7 @@ stats_data = {
     "conexoes_ativas": {}
 }
 
-# Armazenamento seguro de relatórios por usuário
+# Armazenamento seguro de relatórios por utilizador
 relatorios_usuarios = {}
 
 @app.api_route("/api/v1/verificar-licenca", methods=["GET", "POST"])
@@ -171,7 +172,7 @@ def pagina_relatorios(admin: str = Depends(verificar_admin)):
         <table>
             <thead>
                 <tr>
-                    <th>Usuário</th>
+                    <th>Utilizador</th>
                     <th>Capital (Banca Atual)</th>
                     <th>Lucro / Prejuízo Líquido</th>
                     <th>Vitórias / Derrotas</th>
@@ -478,7 +479,7 @@ def obter_estatisticas():
             <header>
                 <div class="header-title">
                     <h1>Painel de Monitoramento</h1>
-                    <p>Gestão de Licenças e Robôs em Tempo Real (Versão Free)</p>
+                    <p>Gestão de Licenças e Robôs em Tempo Real</p>
                 </div>
                 <div class="header-right">
                     <div class="badge-online">ONLINE</div>
@@ -584,3 +585,7 @@ def obter_estatisticas():
     </html>
     """
     return html_content
+
+# Bloco de execução direta para garantir que o servidor sobe sem erros
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
