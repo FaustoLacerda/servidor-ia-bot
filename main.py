@@ -2,8 +2,9 @@ from fastapi import FastAPI, Request, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 import uvicorn
+import json
 import os
 
 app = FastAPI()
@@ -13,6 +14,40 @@ security = HTTPBasic()
 # Credenciais de Administrador para o seu acesso restrito
 ADMIN_USER = "Adm_Master"
 ADMIN_PASS = "R@oyal0987"
+
+# Ficheiro para persistência de dados (evita perder estado ao reiniciar)
+DB_FILE = "dados_servidor.json"
+
+def carregar_dados():
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                dados = json.load(f)
+                # Converter set de IPs de volta
+                dados["ips_conectados"] = set(dados.get("ips_conectados", []))
+                return dados
+        except Exception:
+            pass
+    return {
+        "total_verificacoes": 0,
+        "total_experiencias_enviadas": 0,
+        "ultima_conexao": None,
+        "ips_conectados": set(),
+        "conexoes_ativas": {}
+    }
+
+def salvar_dados():
+    dados_para_salvar = stats_data.copy()
+    # Converter set para lista para serialização JSON
+    dados_para_salvar["ips_conectados"] = list(stats_data["ips_conectados"])
+    try:
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            json.dump(dados_para_salvar, f, ensure_ascii=False, indent=4)
+    except Exception:
+        pass
+
+stats_data = carregar_dados()
+relatorios_usuarios = {}
 
 def verificar_admin(credentials: HTTPBasicCredentials = Depends(security)):
     is_user_ok = secrets.compare_digest(credentials.username, ADMIN_USER)
@@ -24,17 +59,6 @@ def verificar_admin(credentials: HTTPBasicCredentials = Depends(security)):
             headers={"WWW-Authenticate": "Basic"},
         )
     return credentials.username
-
-stats_data = {
-    "total_verificacoes": 0,
-    "total_experiencias_enviadas": 0,
-    "ultima_conexao": None,
-    "ips_conectados": set(),
-    "conexoes_ativas": {}
-}
-
-# Armazenamento seguro de relatórios por utilizador
-relatorios_usuarios = {}
 
 @app.api_route("/api/v1/verificar-licenca", methods=["GET", "POST"])
 async def verificar_licenca(request: Request):
@@ -85,6 +109,7 @@ async def verificar_licenca(request: Request):
         "lon": lon,
         "data_hora": agora
     }
+    salvar_dados()
 
     return {
         "status": "sucesso", 
@@ -92,9 +117,53 @@ async def verificar_licenca(request: Request):
         "localizacao": f"{pais}, {localizacao_completa}"
     }
 
+@app.api_route("/api/v1/heartbeat", methods=["POST", "GET"])
+async def heartbeat_robo(request: Request):
+    """Endpoint dedicado para os robôs manterem a conexão ativa e atualizada."""
+    dados = {}
+    if request.query_params:
+        dados = dict(request.query_params)
+    if not dados:
+        try:
+            dados = await request.json()
+        except Exception:
+            pass
+            
+    usuario = dados.get("usuario") or dados.get("user") or "Robo_Ativo"
+    
+    ip_bruto = request.headers.get("x-forwarded-for")
+    if not ip_bruto and request.client:
+        ip_bruto = request.client.host
+    ip_cliente = ip_bruto.split(",")[0].strip() if ip_bruto else "Desconhecido"
+
+    agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    stats_data["ultima_conexao"] = agora
+
+    # Se o robô já existe nas conexões ativas, apenas atualizamos o horário
+    if usuario in stats_data["conexoes_ativas"]:
+        stats_data["conexoes_ativas"][usuario]["data_hora"] = agora
+        stats_data["conexoes_ativas"][usuario]["ip"] = ip_cliente
+    else:
+        # Se não existe (ex: servidor reiniciou), recriamos o registo básico
+        stats_data["conexoes_ativas"][usuario] = {
+            "usuario": usuario,
+            "ip": ip_cliente,
+            "pais": "Brasil",
+            "cidade": "Campinas",
+            "regiao": "São Paulo",
+            "localizacao": "Campinas - São Paulo",
+            "lat": -22.9056,
+            "lon": -47.0608,
+            "data_hora": agora
+        }
+    
+    salvar_dados()
+    return {"status": "online", "mensagem": "Heartbeat recebido com sucesso"}
+
 @app.api_route("/api/v1/experiencia", methods=["GET", "POST"])
 async def registrar_experiencia(request: Request):
     stats_data["total_experiencias_enviadas"] += 1
+    salvar_dados()
     return {"status": "registrado", "mensagem": "Experiência absorvida."}
 
 @app.api_route("/api/v1/relatorio-usuario", methods=["POST"])
@@ -150,18 +219,28 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
         centro_lon = ultima["lon"]
 
     for c in reversed(lista_conexoes):
+        # Determinar se está online (considera inativo se o último heartbeat tiver mais de 10 minutos)
+        try:
+            dt_conn = datetime.strptime(c['data_hora'], "%Y-%m-%d %H:%M:%S")
+            ativo = datetime.now() - dt_conn < timedelta(minutes=10)
+        except Exception:
+            ativo = True
+
+        status_cor = "#4ade80" if ativo else "#94a3b8"
+        status_txt = "Online" if ativo else "Inativo / Ausente"
+
         ultimas_conexoes_html += f"""
         <tr>
             <td>🌍 {c['pais']}</td>
-            <td>🏙️ <b>{c['localizacao']}</b><br><small style="color:var(--text-muted);">IP: {c['ip']}</small></td>
-            <td><span class="status-dot"></span> <span style="color:#4ade80;">Online</span></td>
+            <td>🏙️ <b>{c['localizacao']}</b><br><small style="color:var(--text-muted);">IP: {c['ip']} | Utilizador: {c['usuario']}</small></td>
+            <td><span class="status-dot" style="background-color: {status_cor};"></span> <span style="color:{status_cor};">{status_txt}</span></td>
             <td>{c['data_hora']}</td>
         </tr>
         """
         marcadores_js += f"""
         L.circleMarker([{c['lat']}, {c['lon']}], {{
             radius: 12,
-            fillColor: "#4ade80",
+            fillColor: "{status_cor}",
             color: "#ffffff",
             weight: 2,
             opacity: 1,
@@ -406,7 +485,6 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
             .status-dot {{
                 height: 8px;
                 width: 8px;
-                background-color: #4ade80;
                 border-radius: 50%;
                 display: inline-block;
             }}
@@ -505,7 +583,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                             <div style="margin-top: 25px;">
                                 <h3 style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase;">Versão da API</h3>
                                 <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
-                                    <span>API v2.4 (Secure Reports)</span>
+                                    <span>API v2.5 (Heartbeat Sync)</span>
                                     <span style="color: var(--accent-green); font-weight: bold;">Estável</span>
                                 </div>
                             </div>
@@ -625,7 +703,6 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
     """
     return html_content
 
-# Bloco local (caso queira testar na sua máquina)
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="127.0.0.1", port=port, reload=True)
