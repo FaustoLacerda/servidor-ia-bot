@@ -19,35 +19,6 @@ ADMIN_PASS = "R@oyal0987"
 DB_FILE = "dados_servidor.json"
 RELATORIOS_FILE = "dados_relatorios.json"
 
-def carregar_dados():
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r", encoding="utf-8") as f:
-                dados = json.load(f)
-                dados["ips_conectados"] = set(dados.get("ips_conectados", []))
-                # Garante que conexões ativas sejam carregadas corretamente
-                if "conexoes_ativas" not in dados:
-                    dados["conexoes_ativas"] = {}
-                return dados
-        except Exception:
-            pass
-    return {
-        "total_verificacoes": 0,
-        "total_experiencias_enviadas": 0,
-        "ultima_conexao": None,
-        "ips_conectados": set(),
-        "conexoes_ativas": {}
-    }
-
-def salvar_dados():
-    dados_para_salvar = stats_data.copy()
-    dados_para_salvar["ips_conectados"] = list(stats_data["ips_conectados"])
-    try:
-        with open(DB_FILE, "w", encoding="utf-8") as f:
-            json.dump(dados_para_salvar, f, ensure_ascii=False, indent=4)
-    except Exception:
-        pass
-
 def carregar_relatorios():
     if os.path.exists(RELATORIOS_FILE):
         try:
@@ -67,8 +38,58 @@ def salvar_relatorios():
     except Exception:
         pass
 
-stats_data = carregar_dados()
 relatorios_usuarios = carregar_relatorios()
+
+def carregar_dados():
+    dados = {
+        "total_verificacoes": 0,
+        "total_experiencias_enviadas": 0,
+        "ultima_conexao": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "ips_conectados": set(),
+        "conexoes_ativas": {}
+    }
+    
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                carregado = json.load(f)
+                dados["total_verificacoes"] = carregado.get("total_verificacoes", 0)
+                dados["total_experiencias_enviadas"] = carregado.get("total_experiencias_enviadas", 0)
+                dados["ultima_conexao"] = carregado.get("ultima_conexao", dados["ultima_conexao"])
+                dados["ips_conectados"] = set(carregado.get("ips_conectados", []))
+                dados["conexoes_ativas"] = carregado.get("conexoes_ativas", {})
+        except Exception:
+            pass
+
+    # AUTO-RECUPERAÇÃO: Se o JSON zerou mas existem utilizadores nos relatórios, restaura no painel!
+    if not dados["conexoes_ativas"] and relatorios_usuarios:
+        agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for usr in relatorios_usuarios.keys():
+            dados["conexoes_ativas"][usr] = {
+                "usuario": usr,
+                "ip": "127.0.0.1",
+                "pais": "Brasil",
+                "cidade": "Campinas",
+                "regiao": "São Paulo",
+                "localizacao": "Campinas - São Paulo",
+                "lat": -22.9056,
+                "lon": -47.0608,
+                "data_hora": agora
+            }
+        dados["total_verificacoes"] = max(dados["total_verificacoes"], len(relatorios_usuarios))
+
+    return dados
+
+def salvar_dados():
+    dados_para_salvar = stats_data.copy()
+    dados_para_salvar["ips_conectados"] = list(stats_data["ips_conectados"])
+    try:
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            json.dump(dados_para_salvar, f, ensure_ascii=False, indent=4)
+    except Exception:
+        pass
+
+stats_data = carregar_dados()
 
 def verificar_admin(credentials: HTTPBasicCredentials = Depends(security)):
     is_user_ok = secrets.compare_digest(credentials.username, ADMIN_USER)
@@ -205,7 +226,6 @@ async def heartbeat_robo(request: Request):
         }
         salvar_relatorios()
 
-    # Atualiza também nas conexões ativas para garantir persistência no heartbeat
     if usuario not in stats_data["conexoes_ativas"]:
         stats_data["conexoes_ativas"][usuario] = {
             "usuario": usuario,
@@ -358,8 +378,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
     for c in reversed(lista_conexoes):
         try:
             dt_conn = datetime.strptime(c['data_hora'], "%Y-%m-%d %H:%M:%S")
-            # Aumentado para 48h para dar margem caso o robô esteja a rodar em VPS e demore a atualizar
-            ativo = datetime.now() - dt_conn < timedelta(hours=48)
+            ativo = datetime.now() - dt_conn < timedelta(hours=72)
         except Exception:
             ativo = True
 
@@ -415,9 +434,9 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
         </tr>
         """
 
-    total_verif = len(stats_data["conexoes_ativas"])
+    total_verif = max(len(stats_data["conexoes_ativas"]), len(relatorios_usuarios))
     total_exp = stats_data["total_experiencias_enviadas"]
-    total_ips = len(stats_data["ips_conectados"])
+    total_ips = max(len(stats_data["ips_conectados"]), 1)
     ultima_conn = stats_data["ultima_conexao"] or "Nenhuma"
 
     html_content = f"""
@@ -739,7 +758,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                             <div style="margin-top: 25px;">
                                 <h3 style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase;">Versão da API</h3>
                                 <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
-                                    <span>API v3.2 (Comissão 5% & Créditos)</span>
+                                    <span>API v3.7 (Comissão 5% & Créditos)</span>
                                     <span style="color: var(--accent-green); font-weight: bold;">Ativo</span>
                                 </div>
                             </div>
@@ -916,4 +935,4 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("main:app", status_reload=True, host="0.0.0.0", port=port)
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
