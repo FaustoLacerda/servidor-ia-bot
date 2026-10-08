@@ -50,7 +50,6 @@ def carregar_relatorios():
         try:
             with open(RELATORIOS_FILE, "r", encoding="utf-8") as f:
                 dados_Carregados = json.load(f)
-                # Remove limpezas antigas caso tenham ficado registadas como "Desconhecido"
                 if "Desconhecido" in dados_Carregados:
                     del dados_Carregados["Desconhecido"]
                 return dados_Carregados
@@ -97,6 +96,11 @@ async def verificar_licenca(request: Request):
             pass
     
     usuario = dados.get("usuario") or dados.get("Usuario") or dados.get("user") or "Adm_adm"
+    licenca = dados.get("licenca") or ""
+    
+    # Validação de segurança da licença (Pode expandir para uma lista ou base de dados de licenças válidas)
+    if licenca and licenca != "PROD-ADM-2026":
+        raise HTTPException(status_code=401, detail="Chave de licença inválida ou expirada.")
 
     ip_bruto = request.headers.get("x-forwarded-for")
     if not ip_bruto and request.client:
@@ -214,10 +218,17 @@ async def receber_relatorio_usuario(request: Request):
     except Exception:
         dados = {}
 
-    # Validação rigorosa para impedir utilizadores desconhecidos
-    usuario = dados.get("usuario") or dados.get("Usuario") or dados.get("user")
-    if not usuario or usuario == "Desconhecido":
-        usuario = "Adm_adm"
+    # BLINDAGEM DE SEGURANÇA: Exige licença e senha válidas para aceitar o relatório
+    licenca = dados.get("licenca") or ""
+    senha = dados.get("senha") or ""
+    usuario = dados.get("usuario") or ""
+
+    # Validação restrita contra acessos não autorizados
+    if not usuario or licenca != "PROD-ADM-2026" or senha != "09870987":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Acesso negado. Credenciais ou licença inválidas para envio de relatórios."
+        )
 
     lucro = float(dados.get("lucro", 0.0))
     banca = float(dados.get("banca", 1000.0))
@@ -642,8 +653,8 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                             <div style="margin-top: 25px;">
                                 <h3 style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase;">Versão da API</h3>
                                 <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
-                                    <span>API v3.0 (Auto Report Sync)</span>
-                                    <span style="color: var(--accent-green); font-weight: bold;">Estável</span>
+                                    <span>API v3.1 (Secured Sync)</span>
+                                    <span style="color: var(--accent-green); font-weight: bold;">Blindada</span>
                                 </div>
                             </div>
                         </div>
