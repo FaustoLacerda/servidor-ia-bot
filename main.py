@@ -46,7 +46,6 @@ async def verificar_licenca(request: Request):
             pass
     
     usuario = dados.get("usuario") or dados.get("Usuario") or dados.get("user") or "Adm_adm"
-    autorizado = True
 
     ip_bruto = request.headers.get("x-forwarded-for")
     if not ip_bruto and request.client:
@@ -62,24 +61,25 @@ async def verificar_licenca(request: Request):
         if ip_cliente == "Desconhecido" and lista_ips:
             ip_cliente = lista_ips[0]
 
-    cidade_origem = "Desconhecida"
-    pais_origem = "Desconhecido"
-    bairro_origem = "Desconhecido"
-    lat = -14.2350
-    lon = -51.9253
+    cidade_origem = "Campinas"
+    regiao_origem = "São Paulo"
+    pais_origem = "Brasil"
+    lat = -22.9056
+    lon = -47.0608
     
     if ip_cliente != "Desconhecido":
         try:
-            url = f"http://ip-api.com/json/{ip_cliente}?fields=status,country,city,district,lat,lon"
+            # Usando ipapi.co que fornece dados detalhados de região e cidade de forma fiável
+            url = f"https://ipapi.co/{ip_cliente}/json/"
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
             with urllib.request.urlopen(req, timeout=3) as response:
-                geo_resposta = json.loads(response.read().decode())
-                if geo_resposta.get("status") == "success":
-                    cidade_origem = geo_resposta.get("city", "Desconhecida")
-                    pais_origem = geo_resposta.get("country", "Desconhecido")
-                    bairro_origem = geo_resposta.get("district") or "Desconhecido"
-                    lat = geo_resposta.get("lat", -14.2350)
-                    lon = geo_resposta.get("lon", -51.9253)
+                geo = json.loads(response.read().decode())
+                if "error" not in geo:
+                    cidade_origem = geo.get("city", "Campinas")
+                    regiao_origem = geo.get("region", "São Paulo")
+                    pais_origem = geo.get("country_name", "Brasil")
+                    lat = float(geo.get("latitude", -22.9056))
+                    lon = float(geo.get("longitude", -47.0608))
         except Exception:
             pass
 
@@ -88,12 +88,15 @@ async def verificar_licenca(request: Request):
     stats_data["ultima_conexao"] = agora
     stats_data["ips_conectados"].add(ip_cliente)
     
+    localizacao_completa = f"{cidade_origem} - {regiao_origem}"
+    
     stats_data["historico_conexoes"].append({
         "usuario": usuario,
         "ip": ip_cliente,
         "pais": pais_origem,
         "cidade": cidade_origem,
-        "bairro": bairro_origem,
+        "regiao": regiao_origem,
+        "localizacao": localizacao_completa,
         "lat": lat,
         "lon": lon,
         "data_hora": agora
@@ -105,7 +108,7 @@ async def verificar_licenca(request: Request):
     return {
         "status": "sucesso", 
         "mensagem": "Licença validada com sucesso",
-        "localizacao": f"{pais_origem}, {cidade_origem} - Bairro: {bairro_origem}"
+        "localizacao": f"{pais_origem}, {localizacao_completa}"
     }
 
 @app.api_route("/api/v1/experiencia", methods=["GET", "POST"])
@@ -118,29 +121,34 @@ def obter_estatisticas():
     ultimas_conexoes_html = ""
     marcadores_js = ""
     
-    # Coordenadas padrão centradas no Brasil caso o histórico esteja vazio
-    centro_lat = -14.2350
-    centro_lon = -51.9253
+    centro_lat = -22.9056
+    centro_lon = -47.0608
     zoom = 4
 
     if stats_data["historico_conexoes"]:
         ultima = stats_data["historico_conexoes"][-1]
         centro_lat = ultima["lat"]
         centro_lon = ultima["lon"]
-        zoom = 6
+        zoom = 5
 
     for c in reversed(stats_data["historico_conexoes"]):
         ultimas_conexoes_html += f"""
         <tr>
             <td>🌍 {c['pais']}</td>
-            <td>🏙️ {c['cidade']} - {c['bairro']}</td>
+            <td>🏙️ {c['localizacao']}</td>
             <td><span class="status-dot"></span> <span style="color:#4ade80;">Online</span></td>
             <td>{c['data_hora']}</td>
         </tr>
         """
         marcadores_js += f"""
-        L.marker([{c['lat']}, {c['lon']}]).addTo(map)
-            .bindPopup("<b>Utilizador:</b> {c['usuario']}<br><b>Local:</b> {c['cidade']}, {c['pais']}<br><b>IP:</b> {c['ip']}");
+        L.circleMarker([{c['lat']}, {{c['lon']}}], {{
+            radius: 8,
+            fillColor: "#4ade80",
+            color: "#fff",
+            weight: 2,
+            opacity: 1,
+            fillOpacity: 0.9
+        }}).addTo(map).bindPopup("<b>Utilizador:</b> {c['usuario']}<br><b>Local:</b> {c['localizacao']}, {c['pais']}<br><b>IP:</b> {c['ip']}");
         """
 
     total_verif = stats_data["total_verificacoes"]
@@ -329,6 +337,7 @@ def obter_estatisticas():
                 height: 380px;
                 width: 100%;
                 border-radius: 8px;
+                background-color: #0c152e;
                 border: 1px solid var(--border-color);
             }}
             .table-wrapper {{
@@ -483,19 +492,22 @@ def obter_estatisticas():
 
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
-            // Inicializa o mapa com correção de carregamento visual
-            var map = L.map('map', {{ zoomControl: false }}).setView([{centro_lat}, {centro_lon}], {zoom});
+            // Inicialização do mapa mundial escuro
+            var map = L.map('map', {{ zoomControl: false, worldCopyJump: true }}).setView([{centro_lat}, {centro_lon}], {zoom});
             L.control.zoom({{ position: 'bottomright' }}).addTo(map);
             
             L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{s}}/{{z}}/{{x}}/{{y}}{{r}}.png', {{
                 attribution: '&copy; OpenStreetMap & CARTO',
+                subdomains: 'abcd',
                 maxZoom: 19
             }}).addTo(map);
 
             {marcadores_js}
 
-            // Força o redimensionamento para garantir que os tiles do mapa apareçam sempre
-            setTimeout(function(){{ map.invalidateSize(); }}, 200);
+            // Garante que o renderizador ajuste perfeitamente o tamanho após o carregamento da página
+            setTimeout(function() {{
+                map.invalidateSize();
+            }, 300);
         </script>
     </body>
     </html>
