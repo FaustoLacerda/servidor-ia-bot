@@ -1,12 +1,27 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+import secrets
 from datetime import datetime
-import json
-import os
-import urllib.request
-import urllib.error
 
 app = FastAPI()
+
+security = HTTPBasic()
+
+# Credenciais de Administrador exclusivas para o seu acesso ao relatório
+ADMIN_USER = "Adm_adm"
+ADMIN_PASS = "09870987"
+
+def verificar_admin(credentials: HTTPBasicCredentials = Depends(security)):
+    is_user_ok = secrets.compare_digest(credentials.username, ADMIN_USER)
+    is_pass_ok = secrets.compare_digest(credentials.password, ADMIN_PASS)
+    if not (is_user_ok and is_pass_ok):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Acesso negado. Credenciais de Administrador inválidas.",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
 
 stats_data = {
     "total_verificacoes": 0,
@@ -15,6 +30,9 @@ stats_data = {
     "ips_conectados": set(),
     "conexoes_ativas": {}  # Dicionário único por utilizador para evitar duplicações
 }
+
+# Armazenamento seguro de relatórios por usuário
+relatorios_usuarios = {}
 
 @app.api_route("/api/v1/verificar-licenca", methods=["GET", "POST"])
 async def verificar_licenca(request: Request):
@@ -36,67 +54,33 @@ async def verificar_licenca(request: Request):
     
     usuario = dados.get("usuario") or dados.get("Usuario") or dados.get("user") or "Adm_adm"
 
-    # Identifica o IP real do cliente (suportando proxies e Cloudflare/Render)
     ip_bruto = request.headers.get("x-forwarded-for")
     if not ip_bruto and request.client:
         ip_bruto = request.client.host
 
-    ip_cliente = "Desconhecido"
-    if ip_bruto:
-        lista_ips = [ip.strip() for ip in ip_bruto.split(",")]
-        for ip in lista_ips:
-            if ip and not ip.startswith(("10.", "192.168.", "127.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.")):
-                ip_cliente = ip
-                break
-        if ip_cliente == "Desconhecido" and lista_ips:
-            ip_cliente = lista_ips[0]
+    ip_cliente = ip_bruto.split(",")[0].strip() if ip_bruto else "Desconhecido"
 
-    # Valores padrão iniciais (caso a consulta externa falhe)
-    cidade_origem = "Campinas"
-    regiao_origem = "São Paulo"
-    pais_origem = "Brasil"
+    # Padrão estável e seguro para teste gratuito (Campinas/SP)
+    pais = "Brasil"
+    cidade = "Campinas"
+    regiao = "São Paulo"
     lat = -22.9056
     lon = -47.0608
-    bairro_detectado = "Centro / Região Metropolitana"
-    provedor_rede = "Provedor de Internet (VPS/ISP)"
-
-    # Sistema de GPS Virtual por IP (Busca automática de alta precisão via ipapi)
-    if ip_cliente != "Desconhecido" and ip_cliente not in ["127.0.0.1", "localhost"]:
-        try:
-            url = f"https://ipapi.co/{ip_cliente}/json/"
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=3) as response:
-                geo = json.loads(response.read().decode())
-                if "error" not in geo:
-                    cidade_origem = geo.get("city", cidade_origem)
-                    regiao_origem = geo.get("region", regiao_origem)
-                    pais_origem = geo.get("country_name", pais_origem)
-                    lat = float(geo.get("latitude", lat))
-                    lon = float(geo.get("longitude", lon))
-                    org = geo.get("org", "")
-                    postal = geo.get("postal", "")
-                    if org:
-                        provedor_rede = org
-                    if postal:
-                        bairro_detectado = f"CEP: {postal} ({provedor_rede})"
-        except Exception as e:
-            print(f"Erro ao consultar geolocalização por IP: {e}")
 
     stats_data["total_verificacoes"] += 1
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     stats_data["ultima_conexao"] = agora
     stats_data["ips_conectados"].add(ip_cliente)
     
-    localizacao_completa = f"{cidade_origem} - {regiao_origem} | Rede: {provedor_rede}"
+    localizacao_completa = f"{cidade} - {regiao}"
     
-    # Armazena de forma limpa e única por utilizador
+    # Registo único por utilizador
     stats_data["conexoes_ativas"][usuario] = {
         "usuario": usuario,
         "ip": ip_cliente,
-        "pais": pais_origem,
-        "cidade": cidade_origem,
-        "regiao": regiao_origem,
-        "bairro": bairro_detectado,
+        "pais": pais,
+        "cidade": cidade,
+        "regiao": regiao,
         "localizacao": localizacao_completa,
         "lat": lat,
         "lon": lon,
@@ -105,14 +89,105 @@ async def verificar_licenca(request: Request):
 
     return {
         "status": "sucesso", 
-        "mensagem": "GPS por IP sincronizado com sucesso",
-        "localizacao": f"{pais_origem}, {cidade_origem}"
+        "mensagem": "Licença validada com sucesso",
+        "localizacao": f"{pais}, {localizacao_completa}"
     }
 
 @app.api_route("/api/v1/experiencia", methods=["GET", "POST"])
 async def registrar_experiencia(request: Request):
     stats_data["total_experiencias_enviadas"] += 1
     return {"status": "registrado", "mensagem": "Experiência absorvida."}
+
+@app.api_route("/api/v1/relatorio-usuario", methods=["POST"])
+async def receber_relatorio_usuario(request: Request):
+    try:
+        dados = await request.json()
+    except Exception:
+        dados = {}
+
+    usuario = dados.get("usuario") or "Desconhecido"
+    lucro = float(dados.get("lucro", 0.0))
+    banca = float(dados.get("banca", 0.0))
+
+    if usuario not in relatorios_usuarios:
+        relatorios_usuarios[usuario] = {
+            "usuario": usuario,
+            "lucro_total": 0.0,
+            "prejuizo_total": 0.0,
+            "operacoes_vencedoras": 0,
+            "operacoes_perdedoras": 0,
+            "banca_atual": banca,
+            "ultima_atualizacao": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+    user_data = relatorios_usuarios[usuario]
+    user_data["banca_atual"] = banca
+    user_data["ultima_atualizacao"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if lucro >= 0:
+        user_data["lucro_total"] += lucro
+        user_data["operacoes_vencedoras"] += 1
+    else:
+        user_data["prejuizo_total"] += abs(lucro)
+        user_data["operacoes_perdedoras"] += 1
+
+    return {"status": "sucesso", "mensagem": "Relatório atualizado com segurança"}
+
+@app.get("/api/v1/relatorios", response_class=HTMLResponse)
+def pagina_relatorios(admin: str = Depends(verificar_admin)):
+    linhas_tabela = ""
+    for usr, info in relatorios_usuarios.items():
+        lucro_liquido = info["lucro_total"] - info["prejuizo_total"]
+        cor_lucro = "#4ade80" if lucro_liquido >= 0 else "#f87171"
+        sinal = "+" if lucro_liquido >= 0 else ""
+        
+        linhas_tabela += f"""
+        <tr>
+            <td>👤 <b>{usr}</b></td>
+            <td>💰 R$ {info['banca_atual']:.2f}</td>
+            <td style="color: {cor_lucro}; font-weight: bold;">{sinal}R$ {lucro_liquido:.2f}</td>
+            <td>✅ {info['operacoes_vencedoras']} / ❌ {info['operacoes_perdedoras']}</td>
+            <td>{info['ultima_atualizacao']}</td>
+        </tr>
+        """
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="pt">
+    <head>
+        <meta charset="UTF-8">
+        <title>Relatório Confidencial por Usuário</title>
+        <style>
+            body {{ font-family: 'Segoe UI', sans-serif; background-color: #070d1b; color: #f8fafc; padding: 30px; }}
+            table {{ width: 100%; border-collapse: collapse; background: #111c38; border-radius: 8px; overflow: hidden; }}
+            th, td {{ padding: 15px; text-align: left; border-bottom: 1px solid #1e294b; }}
+            th {{ background: #0b1329; color: #94a3b8; }}
+            h1 {{ color: #38bdf8; font-size: 22px; }}
+            .badge-sec {{ background: rgba(74, 222, 128, 0.1); color: #4ade80; padding: 5px 10px; border-radius: 4px; font-size: 12px; }}
+        </style>
+    </head>
+    <body>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h1>📊 Relatório Confidencial de Desempenho</h1>
+            <span class="badge-sec">🔒 Sessão Segura (Admin: {admin})</span>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Usuário</th>
+                    <th>Capital (Banca Atual)</th>
+                    <th>Lucro / Prejuízo Líquido</th>
+                    <th>Vitórias / Derrotas</th>
+                    <th>Última Atividade</th>
+                </tr>
+            </thead>
+            <tbody>
+                {linhas_tabela if linhas_tabela else '<tr><td colspan="5" style="text-align:center; color:#94a3b8;">Nenhum dado de relatório recebido ainda.</td></tr>'}
+            </tbody>
+        </table>
+    </body>
+    </html>
+    """
 
 @app.get("/api/v1/stats", response_class=HTMLResponse)
 def obter_estatisticas():
@@ -121,7 +196,7 @@ def obter_estatisticas():
     
     centro_lat = -22.9056
     centro_lon = -47.0608
-    zoom = 4
+    zoom = 11
 
     lista_conexoes = list(stats_data["conexoes_ativas"].values())
 
@@ -129,13 +204,12 @@ def obter_estatisticas():
         ultima = lista_conexoes[-1]
         centro_lat = ultima["lat"]
         centro_lon = ultima["lon"]
-        zoom = 13  # Zoom detalhado da região do IP
 
     for c in reversed(lista_conexoes):
         ultimas_conexoes_html += f"""
         <tr>
             <td>🌍 {c['pais']}</td>
-            <td>🏙️ <b>{c['cidade']} - {c['regiao']}</b><br><small style="color:var(--text-muted);">{c['bairro']} | IP: {c['ip']}</small></td>
+            <td>🏙️ <b>{c['localizacao']}</b><br><small style="color:var(--text-muted);">IP: {c['ip']}</small></td>
             <td><span class="status-dot"></span> <span style="color:#4ade80;">Online</span></td>
             <td>{c['data_hora']}</td>
         </tr>
@@ -148,7 +222,7 @@ def obter_estatisticas():
             weight: 2,
             opacity: 1,
             fillOpacity: 0.95
-        }}).addTo(map).bindPopup("<b>Utilizador:</b> {c['usuario']}<br><b>Cidade:</b> {c['cidade']}, {c['regiao']}<br><b>Info Rede:</b> {c['bairro']}<br><b>IP:</b> {c['ip']}");
+        }}).addTo(map).bindPopup("<b>Utilizador:</b> {c['usuario']}<br><b>Local:</b> {c['localizacao']}, {c['pais']}<br><b>IP:</b> {c['ip']}");
         """
 
     total_verif = len(stats_data["conexoes_ativas"])
@@ -407,7 +481,7 @@ def obter_estatisticas():
             <header>
                 <div class="header-title">
                     <h1>Painel de Monitoramento</h1>
-                    <p>Gestão de Licenças e Robôs em Tempo Real (GPS por IP Ativo)</p>
+                    <p>Gestão de Licenças e Robôs em Tempo Real (Versão Free)</p>
                 </div>
                 <div class="header-right">
                     <div class="badge-online">ONLINE</div>
@@ -461,7 +535,7 @@ def obter_estatisticas():
                         <div style="margin-top: 25px;">
                             <h3 style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase;">Versão da API</h3>
                             <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
-                                <span>API v2.0 (GPS por IP)</span>
+                                <span>API v2.2 (Secure Reports)</span>
                                 <span style="color: var(--accent-green); font-weight: bold;">Estável</span>
                             </div>
                         </div>
@@ -475,7 +549,7 @@ def obter_estatisticas():
                             <thead>
                                 <tr>
                                     <th>País</th>
-                                    <th>Localização & Rede</th>
+                                    <th>Localização</th>
                                     <th>Status</th>
                                     <th>Horário</th>
                                 </tr>
