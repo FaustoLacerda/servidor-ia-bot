@@ -339,7 +339,6 @@ def obter_estatisticas():
                 background-color: #070d1b;
                 border: 1px solid var(--border-color);
             }}
-            /* FILTRO INTELIGENTE QUE TRANSFORMA QUALQUER MAPA NUM MAPA ESCURO ESTILIZADO */
             .leaflet-tile-pane {{
                 filter: brightness(0.65) invert(1) contrast(2.8) hue-rotate(200deg) saturate(1.2);
             }}
@@ -478,7 +477,7 @@ def obter_estatisticas():
                                     <th>Localização</th>
                                     <th>Status</th>
                                     <th>Horário</th>
-                                };
+                                </tr>
                             </thead>
                             <tbody>
                                 {ultimas_conexoes_html if ultimas_conexoes_html else '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">A aguardar conexões...</td></tr>'}
@@ -498,8 +497,7 @@ def obter_estatisticas():
             var map = L.map('map', {{ zoomControl: false, worldCopyJump: true }}).setView([{centro_lat}, {centro_lon}], {zoom});
             L.control.zoom({{ position: 'bottomright' }}).addTo(map);
             
-            // Camada fiável do OpenStreetMap processada pelo filtro estético escuro
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {{
+            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
                 attribution: '&copy; OpenStreetMap',
                 maxZoom: 19
             }}).addTo(map);
