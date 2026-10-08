@@ -98,7 +98,6 @@ async def verificar_licenca(request: Request):
     usuario = dados.get("usuario") or dados.get("Usuario") or dados.get("user") or "Adm_adm"
     licenca = dados.get("licenca") or ""
     
-    # Validação de segurança da licença (Pode expandir para uma lista ou base de dados de licenças válidas)
     if licenca and licenca != "PROD-ADM-2026":
         raise HTTPException(status_code=401, detail="Chave de licença inválida ou expirada.")
 
@@ -141,15 +140,30 @@ async def verificar_licenca(request: Request):
             "operacoes_vencedoras": 0,
             "operacoes_perdedoras": 0,
             "banca_atual": 1000.00,
+            "saldo_creditos": 50.00,       # Carteira pré-paga inicial de cortesia
+            "comissao_devida": 0.0,        # 5% gerado sobre lucros
+            "status_robo": "ATIVO",        # ATIVO ou BLOQUEADO por falta de saldo
             "ultima_atualizacao": agora
         }
         salvar_relatorios()
 
     salvar_dados()
 
+    # Verifica se o robô tem saldo para operar
+    user_info = relatorios_usuarios[usuario]
+    if user_info.get("saldo_creditos", 0) <= 0:
+        user_info["status_robo"] = "BLOQUEADO"
+        salvar_relatorios()
+        return {
+            "status": "bloqueado",
+            "mensagem": "Saldo de créditos esgotados. Recarregue via Pix para continuar.",
+            "saldo_creditos": 0.0
+        }
+
     return {
         "status": "sucesso", 
         "mensagem": "Licença validada com sucesso",
+        "saldo_creditos": user_info.get("saldo_creditos", 0.0),
         "localizacao": f"{pais}, {localizacao_completa}"
     }
 
@@ -174,22 +188,6 @@ async def heartbeat_robo(request: Request):
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     stats_data["ultima_conexao"] = agora
 
-    if usuario in stats_data["conexoes_ativas"]:
-        stats_data["conexoes_ativas"][usuario]["data_hora"] = agora
-        stats_data["conexoes_ativas"][usuario]["ip"] = ip_cliente
-    else:
-        stats_data["conexoes_ativas"][usuario] = {
-            "usuario": usuario,
-            "ip": ip_cliente,
-            "pais": "Brasil",
-            "cidade": "Campinas",
-            "regiao": "São Paulo",
-            "localizacao": "Campinas - São Paulo",
-            "lat": -22.9056,
-            "lon": -47.0608,
-            "data_hora": agora
-        }
-
     if usuario not in relatorios_usuarios:
         relatorios_usuarios[usuario] = {
             "usuario": usuario,
@@ -198,12 +196,24 @@ async def heartbeat_robo(request: Request):
             "operacoes_vencedoras": 0,
             "operacoes_perdedoras": 0,
             "banca_atual": 1000.00,
+            "saldo_creditos": 50.00,
+            "comissao_devida": 0.0,
+            "status_robo": "ATIVO",
             "ultima_atualizacao": agora
         }
         salvar_relatorios()
     
     salvar_dados()
-    return {"status": "online", "mensagem": "Heartbeat recebido com sucesso"}
+    
+    user_info = relatorios_usuarios[usuario]
+    status_atual = user_info.get("status_robo", "ATIVO")
+    
+    return {
+        "status": "online", 
+        "estado_robo": status_atual,
+        "saldo_creditos": user_info.get("saldo_creditos", 0.0),
+        "mensagem": "Heartbeat recebido"
+    }
 
 @app.api_route("/api/v1/experiencia", methods=["GET", "POST"])
 async def registrar_experiencia(request: Request):
@@ -218,12 +228,10 @@ async def receber_relatorio_usuario(request: Request):
     except Exception:
         dados = {}
 
-    # BLINDAGEM DE SEGURANÇA: Exige licença e senha válidas para aceitar o relatório
     licenca = dados.get("licenca") or ""
     senha = dados.get("senha") or ""
     usuario = dados.get("usuario") or ""
 
-    # Validação restrita contra acessos não autorizados
     if not usuario or licenca != "PROD-ADM-2026" or senha != "09870987":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -241,6 +249,9 @@ async def receber_relatorio_usuario(request: Request):
             "operacoes_vencedoras": 0,
             "operacoes_perdedoras": 0,
             "banca_atual": banca,
+            "saldo_creditos": 50.00,
+            "comissao_devida": 0.0,
+            "status_robo": "ATIVO",
             "ultima_atualizacao": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
 
@@ -248,21 +259,39 @@ async def receber_relatorio_usuario(request: Request):
     user_data["banca_atual"] = banca
     user_data["ultima_atualizacao"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    # Lógica de cálculo de lucro, comissão de 5% e desconto automático do pré-pago
     if lucro >= 0:
         user_data["lucro_total"] += lucro
         user_data["operacoes_vencedoras"] += 1
+        
+        # Calcula 5% de comissão sobre o lucro obtido
+        comissao_trade = lucro * 0.05
+        user_data["comissao_devida"] = user_data.get("comissao_devida", 0.0) + comissao_trade
+        
+        # Desconta automaticamente da carteira pré-paga
+        user_data["saldo_creditos"] = user_data.get("saldo_creditos", 0.0) - comissao_trade
+        
+        # Se o saldo zerar ou ficar negativo, bloqueia o robô
+        if user_data["saldo_creditos"] <= 0:
+            user_data["status_robo"] = "BLOQUEADO"
     else:
         user_data["prejuizo_total"] += abs(lucro)
         user_data["operacoes_perdedoras"] += 1
 
     salvar_relatorios()
-    return {"status": "sucesso", "mensagem": "Relatório atualizado com segurança"}
+    return {
+        "status": "sucesso", 
+        "mensagem": "Relatório processado e comissão descontada com segurança",
+        "saldo_creditos_atual": user_data["saldo_creditos"],
+        "status_robo": user_data["status_robo"]
+    }
 
 @app.get("/api/v1/stats", response_class=HTMLResponse)
 def obter_estatisticas(admin: str = Depends(verificar_admin)):
     ultimas_conexoes_html = ""
     marcadores_js = ""
     linhas_relatorios_html = ""
+    linhas_financeiro_html = ""
     
     centro_lat = -22.9056
     centro_lon = -47.0608
@@ -280,6 +309,9 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 "operacoes_vencedoras": 0,
                 "operacoes_perdedoras": 0,
                 "banca_atual": 1000.00,
+                "saldo_creditos": 50.00,
+                "comissao_devida": 0.0,
+                "status_robo": "ATIVO",
                 "ultima_atualizacao": c["data_hora"]
             }
             salvar_relatorios()
@@ -323,6 +355,11 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
         cor_lucro = "#4ade80" if lucro_liquido >= 0 else "#f87171"
         sinal = "+" if lucro_liquido >= 0 else ""
         
+        saldo_cred = info.get("saldo_creditos", 50.0)
+        comissao_gerada = info.get("comissao_devida", 0.0)
+        status_robo = info.get("status_robo", "ATIVO")
+        cor_status = "#4ade80" if status_robo == "ATIVO" else "#f87171"
+        
         linhas_relatorios_html += f"""
         <tr>
             <td>👤 <b>{usr}</b></td>
@@ -330,6 +367,16 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
             <td style="color: {cor_lucro}; font-weight: bold;">{sinal}R$ {lucro_liquido:.2f}</td>
             <td>✅ {info['operacoes_vencedoras']} / ❌ {info['operacoes_perdedoras']}</td>
             <td>{info['ultima_atualizacao']}</td>
+        </tr>
+        """
+
+        linhas_financeiro_html += f"""
+        <tr>
+            <td>👤 <b>{usr}</b></td>
+            <td>R$ {saldo_cred:.2f}</td>
+            <td style="color: #38bdf8; font-weight: bold;">R$ {comissao_gerada:.2f}</td>
+            <td><span style="color: {cor_status}; font-weight: bold;">{status_robo}</span></td>
+            <td><button onclick="alert('Funcionalidade de recarga Pix rápida para {usr}')" style="background:#38bdf8; color:#070d1b; border:none; padding:5px 10px; border-radius:4px; cursor:pointer; font-weight:bold;">+ Adicionar Crédito</button></td>
         </tr>
         """
 
@@ -589,6 +636,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
             </div>
             <div class="menu-item active" onclick="switchTab('visao-geral', this)"><i class="fa-solid fa-chart-pie"></i> Visão Geral</div>
             <div class="menu-item" onclick="switchTab('relatorios', this)"><i class="fa-solid fa-file-invoice-dollar"></i> Relatórios</div>
+            <div class="menu-item" onclick="switchTab('financeiro', this)"><i class="fa-solid fa-wallet"></i> Financeiro & Créditos</div>
             <div class="menu-item" onclick="switchTab('mapa', this)"><i class="fa-solid fa-globe"></i> Mapa Mundial</div>
             <div class="menu-item" onclick="switchTab('conexoes', this)"><i class="fa-solid fa-network-wired"></i> Conexões</div>
         </aside>
@@ -597,7 +645,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
             <header>
                 <div class="header-title">
                     <h1 id="header-title-text">Painel de Monitoramento</h1>
-                    <p id="header-subtitle-text">Gestão de Licenças e Robôs em Tempo Real (Admin: {admin})</p>
+                    <p id="header-subtitle-text">Gestão de Licenças e Créditos em Tempo Real (Admin: {admin})</p>
                 </div>
                 <div class="header-right">
                     <div class="badge-online">ONLINE</div>
@@ -653,8 +701,8 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                             <div style="margin-top: 25px;">
                                 <h3 style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase;">Versão da API</h3>
                                 <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
-                                    <span>API v3.1 (Secured Sync)</span>
-                                    <span style="color: var(--accent-green); font-weight: bold;">Blindada</span>
+                                    <span>API v3.2 (Comissão 5% & Créditos)</span>
+                                    <span style="color: var(--accent-green); font-weight: bold;">Ativo</span>
                                 </div>
                             </div>
                         </div>
@@ -703,7 +751,33 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                     </div>
                 </div>
 
-                <!-- ABA 3: MAPA MUNDIAL -->
+                <!-- ABA 3: FINANCEIRO & CRÉDITOS -->
+                <div id="financeiro" class="tab-content">
+                    <div class="panel">
+                        <h2><i class="fa-solid fa-wallet" style="color: var(--accent-blue);"></i> Controlo Financeiro, Carteira Pré-Paga e Comissão (5%)</h2>
+                        <p style="color: var(--text-muted); font-size: 13px; margin-top: -5px; margin-bottom: 15px;">
+                            Acompanhe o saldo pré-pago de cada cliente e o valor acumulado das comissões descontadas automaticamente a cada lucro.
+                        </p>
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Utilizador</th>
+                                        <th>Saldo Pré-Pago (Carteira)</th>
+                                        <th>Comissão Gerada (5%)</th>
+                                        <th>Estado do Robô</th>
+                                        <th>Ação Administrativa</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {linhas_financeiro_html if linhas_financeiro_html else '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">Nenhum registo financeiro encontrado.</td></tr>'}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ABA 4: MAPA MUNDIAL -->
                 <div id="mapa" class="tab-content">
                     <div class="panel">
                         <h2><i class="fa-solid fa-globe" style="color: var(--accent-blue);"></i> Vista Expandida do Mapa Global</h2>
@@ -711,7 +785,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                     </div>
                 </div>
 
-                <!-- ABA 4: CONEXÕES -->
+                <!-- ABA 5: CONEXÕES -->
                 <div id="conexoes" class="tab-content">
                     <div class="panel">
                         <h2><i class="fa-solid fa-network-wired" style="color: var(--accent-blue);"></i> Registo Completo de Conexões</h2>
@@ -753,7 +827,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
 
             setTimeout(function() {{
                 {marcadores_js.replace("addTo(map)", "addTo(mapExpanded)")}
-            }}, 100);
+            }}, 200);
 
             function switchTab(tabId, element) {{
                 document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
