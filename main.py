@@ -124,6 +124,20 @@ async def verificar_licenca(request: Request):
         "lon": lon,
         "data_hora": agora
     }
+
+    # Garante que o utilizador verificado também apareça automaticamente nos relatórios
+    if usuario not in relatorios_usuarios:
+        relatorios_usuarios[usuario] = {
+            "usuario": usuario,
+            "lucro_total": 0.0,
+            "prejuizo_total": 0.0,
+            "operacoes_vencedoras": 0,
+            "operacoes_perdedoras": 0,
+            "banca_atual": 1000.00,  # Banca inicial padrão
+            "ultima_atualizacao": agora
+        }
+        salvar_relatorios()
+
     salvar_dados()
 
     return {
@@ -168,6 +182,18 @@ async def heartbeat_robo(request: Request):
             "lon": -47.0608,
             "data_hora": agora
         }
+
+    if usuario not in relatorios_usuarios:
+        relatorios_usuarios[usuario] = {
+            "usuario": usuario,
+            "lucro_total": 0.0,
+            "prejuizo_total": 0.0,
+            "operacoes_vencedoras": 0,
+            "operacoes_perdedoras": 0,
+            "banca_atual": 1000.00,
+            "ultima_atualizacao": agora
+        }
+        salvar_relatorios()
     
     salvar_dados()
     return {"status": "online", "mensagem": "Heartbeat recebido com sucesso"}
@@ -185,7 +211,7 @@ async def receber_relatorio_usuario(request: Request):
     except Exception:
         dados = {}
 
-    usuario = dados.get("usuario") or dados.get("Desconhecido")
+    usuario = dados.get("usuario") or "Desconhecido"
     lucro = float(dados.get("lucro", 0.0))
     banca = float(dados.get("banca", 0.0))
 
@@ -226,6 +252,21 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
 
     lista_conexoes = list(stats_data["conexoes_ativas"].values())
 
+    # Sincronização automática de relatórios com base nos robôs conectados ativos
+    for c in lista_conexoes:
+        usr = c["usuario"]
+        if usr not in relatorios_usuarios:
+            relatorios_usuarios[usr] = {
+                "usuario": usr,
+                "lucro_total": 0.0,
+                "prejuizo_total": 0.0,
+                "operacoes_vencedoras": 0,
+                "operacoes_perdedoras": 0,
+                "banca_atual": 1000.00,
+                "ultima_atualizacao": c["data_hora"]
+            }
+            salvar_relatorios()
+
     if lista_conexoes:
         ultima = lista_conexoes[-1]
         centro_lat = ultima["lat"]
@@ -234,7 +275,6 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
     for c in reversed(lista_conexoes):
         try:
             dt_conn = datetime.strptime(c['data_hora'], "%Y-%m-%d %H:%M:%S")
-            # Tolerância de 24 horas para considerar o robô ativo no painel
             ativo = datetime.now() - dt_conn < timedelta(hours=24)
         except Exception:
             ativo = True
@@ -596,7 +636,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                             <div style="margin-top: 25px;">
                                 <h3 style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase;">Versão da API</h3>
                                 <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
-                                    <span>API v2.9 (Persistent Fix)</span>
+                                    <span>API v3.0 (Auto Report Sync)</span>
                                     <span style="color: var(--accent-green); font-weight: bold;">Estável</span>
                                 </div>
                             </div>
