@@ -28,27 +28,42 @@ stats_data = {
 
 @app.post("/api/v1/verificar-licenca")
 async def verificar_licenca(request: Request):
+    dados = {}
+    
+    # Tenta ler como JSON
     try:
         dados = await request.json()
     except Exception:
-        dados = {}
+        pass
+        
+    # Se falhar ou estiver vazio, tenta ler como Form Data / URL-encoded
+    if not dados:
+        try:
+            form_data = await request.form()
+            dados = dict(form_data)
+        except Exception:
+            pass
+            
+    # Se ainda estiver vazio, verifica os parâmetros da query URL
+    if not dados and request.query_params:
+        dados = dict(request.query_params)
     
-    usuario = dados.get("usuario") or dados.get("Usuario") or "Desconhecido"
-    senha = dados.get("senha") or dados.get("Senha") or ""
-    licenca = dados.get("licenca") or dados.get("Licenca") or ""
+    usuario = dados.get("usuario") or dados.get("Usuario") or dados.get("user") or "Desconhecido"
+    senha = dados.get("senha") or dados.get("Senha") or dados.get("password") or ""
+    licenca = dados.get("licenca") or dados.get("Licenca") or dados.get("license") or ""
     
-    # Validação flexível e direta para o administrador
+    # Validação direta do administrador e ficheiro local
     autorizado = False
     if str(usuario).strip() == "Adm_adm" and str(senha).strip() == "09870987" and str(licenca).strip() == "PROD-ADM-2026":
         autorizado = True
     else:
         clientes = carregar_clientes()
         if clientes and usuario in clientes:
-            if clientes[usuario].get("senha") == senha and clientes[usuario].get("licenca") == licenca:
+            if str(clientes[usuario].get("senha")) == str(senha) and str(clientes[usuario].get("licenca")) == str(licenca):
                 autorizado = True
 
     if not autorizado:
-        print(f"AVISO: Tentativa de acesso negado para usuário: {usuario} com dados: {dados}")
+        print(f"AVISO: Acesso negado para usuário: {usuario} | Dados recebidos: {dados}")
         raise HTTPException(status_code=401, detail="Licença inválida ou credenciais incorretas.")
 
     ip_cliente = request.client.forwarded_for or request.client.host
@@ -92,10 +107,6 @@ async def verificar_licenca(request: Request):
 
 @app.post("/api/v1/experiencia")
 async def registrar_experiencia(request: Request):
-    try:
-        dados = await request.json()
-    except Exception:
-        dados = {}
     stats_data["total_experiencias_enviadas"] += 1
     return {"status": "registrado", "mensagem": "Experiência absorvida."}
 
