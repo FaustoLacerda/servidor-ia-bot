@@ -61,7 +61,6 @@ def carregar_dados():
         except Exception:
             pass
 
-    # AUTO-RECUPERAÇÃO: Se o JSON zerou mas existem utilizadores nos relatórios, restaura no painel!
     if not dados["conexoes_ativas"] and relatorios_usuarios:
         agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for usr in relatorios_usuarios.keys():
@@ -163,8 +162,8 @@ async def verificar_licenca(request: Request):
             "prejuizo_total": 0.0,
             "operacoes_vencedoras": 0,
             "operacoes_perdedoras": 0,
-            "banca_atual": 1000.00,
-            "saldo_creditos": 50.00,
+            "banca_atual": 0.0,
+            "saldo_creditos": 0.0,
             "comissao_devida": 0.0,
             "status_robo": "ATIVO",
             "ultima_atualizacao": agora
@@ -174,14 +173,8 @@ async def verificar_licenca(request: Request):
     salvar_dados()
 
     user_info = relatorios_usuarios[usuario]
-    if user_info.get("saldo_creditos", 0) <= 0:
-        user_info["status_robo"] = "BLOQUEADO"
-        salvar_relatorios()
-        return {
-            "status": "bloqueado",
-            "mensagem": "Saldo de créditos esgotados. Recarregue via Pix para continuar.",
-            "saldo_creditos": 0.0
-        }
+    if user_info.get("saldo_creditos", 0) <= 0 and user_info.get("banca_atual", 0) > 0:
+        pass
 
     return {
         "status": "sucesso", 
@@ -218,8 +211,8 @@ async def heartbeat_robo(request: Request):
             "prejuizo_total": 0.0,
             "operacoes_vencedoras": 0,
             "operacoes_perdedoras": 0,
-            "banca_atual": 1000.00,
-            "saldo_creditos": 50.00,
+            "banca_atual": 0.0,
+            "saldo_creditos": 0.0,
             "comissao_devida": 0.0,
             "status_robo": "ATIVO",
             "ultima_atualizacao": agora
@@ -277,7 +270,7 @@ async def receber_relatorio_usuario(request: Request):
         )
 
     lucro = float(dados.get("lucro", 0.0))
-    banca = float(dados.get("banca", 1000.0))
+    banca = float(dados.get("banca", 0.0))
 
     if usuario not in relatorios_usuarios:
         relatorios_usuarios[usuario] = {
@@ -287,7 +280,7 @@ async def receber_relatorio_usuario(request: Request):
             "operacoes_vencedoras": 0,
             "operacoes_perdedoras": 0,
             "banca_atual": banca,
-            "saldo_creditos": 50.00,
+            "saldo_creditos": 0.0,
             "comissao_devida": 0.0,
             "status_robo": "ATIVO",
             "ultima_atualizacao": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -299,14 +292,8 @@ async def receber_relatorio_usuario(request: Request):
 
     if lucro >= 0:
         user_data["lucro_total"] += lucro
-        user_data["operacoes_vencedoras"] += 1
-        
-        comissao_trade = lucro * 0.05
-        user_data["comissao_devida"] = user_data.get("comissao_devida", 0.0) + comissao_trade
-        user_data["saldo_creditos"] = user_data.get("saldo_creditos", 0.0) - comissao_trade
-        
-        if user_data["saldo_creditos"] <= 0:
-            user_data["status_robo"] = "BLOQUEADO"
+        if lucro > 0:
+            user_data["operacoes_vencedoras"] += 1
     else:
         user_data["prejuizo_total"] += abs(lucro)
         user_data["operacoes_perdedoras"] += 1
@@ -314,7 +301,7 @@ async def receber_relatorio_usuario(request: Request):
     salvar_relatorios()
     return {
         "status": "sucesso", 
-        "mensagem": "Relatório processado e comissão descontada com segurança",
+        "mensagem": "Relatório processado com sucesso",
         "saldo_creditos_atual": user_data["saldo_creditos"],
         "status_robo": user_data["status_robo"]
     }
@@ -362,8 +349,8 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 "prejuizo_total": 0.0,
                 "operacoes_vencedoras": 0,
                 "operacoes_perdedoras": 0,
-                "banca_atual": 1000.00,
-                "saldo_creditos": 50.00,
+                "banca_atual": 0.0,
+                "saldo_creditos": 0.0,
                 "comissao_devida": 0.0,
                 "status_robo": "ATIVO",
                 "ultima_atualizacao": c["data_hora"]
@@ -409,7 +396,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
         cor_lucro = "#4ade80" if lucro_liquido >= 0 else "#f87171"
         sinal = "+" if lucro_liquido >= 0 else ""
         
-        saldo_cred = info.get("saldo_creditos", 50.0)
+        saldo_cred = info.get("saldo_creditos", 0.0)
         comissao_gerada = info.get("comissao_devida", 0.0)
         status_robo = info.get("status_robo", "ATIVO")
         cor_status = "#4ade80" if status_robo == "ATIVO" else "#f87171"
@@ -758,7 +745,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                             <div style="margin-top: 25px;">
                                 <h3 style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase;">Versão da API</h3>
                                 <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
-                                    <span>API v3.7 (Comissão 5% & Créditos)</span>
+                                    <span>API v3.8 (Comissão & Créditos Dinâmicos)</span>
                                     <span style="color: var(--accent-green); font-weight: bold;">Ativo</span>
                                 </div>
                             </div>
