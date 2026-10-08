@@ -3,6 +3,8 @@ from fastapi.responses import HTMLResponse
 from datetime import datetime
 import json
 import os
+import urllib.request
+import urllib.error
 
 app = FastAPI()
 
@@ -11,7 +13,7 @@ stats_data = {
     "total_experiencias_enviadas": 0,
     "ultima_conexao": None,
     "ips_conectados": set(),
-    "conexoes_ativas": {}  # Registo único por utilizador para evitar duplicações
+    "conexoes_ativas": {}  # Dicionário único por utilizador para evitar duplicações
 }
 
 @app.api_route("/api/v1/verificar-licenca", methods=["GET", "POST"])
@@ -34,43 +36,67 @@ async def verificar_licenca(request: Request):
     
     usuario = dados.get("usuario") or dados.get("Usuario") or dados.get("user") or "Adm_adm"
 
-    # Captura exata dos dados enviados pelo robô
-    rua = dados.get("rua") or dados.get("address") or "Endereço não informado"
-    bairro = dados.get("bairro") or dados.get("neighborhood") or "Bairro não informado"
-    cidade = dados.get("cidade") or dados.get("city") or "Campinas"
-    regiao = dados.get("regiao") or dados.get("region") or "São Paulo"
-    pais = dados.get("pais") or dados.get("country") or "Brasil"
-    
-    # Coordenadas enviadas pelo robô (com fallback para Campinas caso venham vazias)
-    try:
-        lat = float(dados.get("latitude") or dados.get("lat") or -22.9056)
-        lon = float(dados.get("longitude") or dados.get("lon") or -47.0608)
-    except:
-        lat = -22.9056
-        lon = -47.0608
-
+    # Identifica o IP real do cliente (suportando proxies e Cloudflare/Render)
     ip_bruto = request.headers.get("x-forwarded-for")
     if not ip_bruto and request.client:
         ip_bruto = request.client.host
 
-    ip_cliente = ip_bruto.split(",")[0].strip() if ip_bruto else "Desconhecido"
+    ip_cliente = "Desconhecido"
+    if ip_bruto:
+        lista_ips = [ip.strip() for ip in ip_bruto.split(",")]
+        for ip in lista_ips:
+            if ip and not ip.startswith(("10.", "192.168.", "127.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.")):
+                ip_cliente = ip
+                break
+        if ip_cliente == "Desconhecido" and lista_ips:
+            ip_cliente = lista_ips[0]
+
+    # Valores padrão iniciais (caso a consulta externa falhe)
+    cidade_origem = "Campinas"
+    regiao_origem = "São Paulo"
+    pais_origem = "Brasil"
+    lat = -22.9056
+    lon = -47.0608
+    bairro_detectado = "Centro / Região Metropolitana"
+    provedor_rede = "Provedor de Internet (VPS/ISP)"
+
+    # Sistema de GPS Virtual por IP (Busca automática de alta precisão via ipapi)
+    if ip_cliente != "Desconhecido" and ip_cliente not in ["127.0.0.1", "localhost"]:
+        try:
+            url = f"https://ipapi.co/{ip_cliente}/json/"
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=3) as response:
+                geo = json.loads(response.read().decode())
+                if "error" not in geo:
+                    cidade_origem = geo.get("city", cidade_origem)
+                    regiao_origem = geo.get("region", regiao_origem)
+                    pais_origem = geo.get("country_name", pais_origem)
+                    lat = float(geo.get("latitude", lat))
+                    lon = float(geo.get("longitude", lon))
+                    org = geo.get("org", "")
+                    postal = geo.get("postal", "")
+                    if org:
+                        provedor_rede = org
+                    if postal:
+                        bairro_detectado = f"CEP: {postal} ({provedor_rede})"
+        except Exception as e:
+            print(f"Erro ao consultar geolocalização por IP: {e}")
 
     stats_data["total_verificacoes"] += 1
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     stats_data["ultima_conexao"] = agora
     stats_data["ips_conectados"].add(ip_cliente)
     
-    # Monta a localização detalhada com Rua, Bairro e Cidade
-    localizacao_completa = f"{cidade} - {regiao} | Bairro: {bairro} | Rua: {rua}"
+    localizacao_completa = f"{cidade_origem} - {regiao_origem} | Rede: {provedor_rede}"
     
-    # Guarda de forma única por utilizador
+    # Armazena de forma limpa e única por utilizador
     stats_data["conexoes_ativas"][usuario] = {
         "usuario": usuario,
         "ip": ip_cliente,
-        "pais": pais,
-        "cidade": cidade,
-        "bairro": bairro,
-        "rua": rua,
+        "pais": pais_origem,
+        "cidade": cidade_origem,
+        "regiao": regiao_origem,
+        "bairro": bairro_detectado,
         "localizacao": localizacao_completa,
         "lat": lat,
         "lon": lon,
@@ -79,8 +105,8 @@ async def verificar_licenca(request: Request):
 
     return {
         "status": "sucesso", 
-        "mensagem": "Licença e localização exata sincronizadas com sucesso",
-        "localizacao": localizacao_completa
+        "mensagem": "GPS por IP sincronizado com sucesso",
+        "localizacao": f"{pais_origem}, {cidade_origem}"
     }
 
 @app.api_route("/api/v1/experiencia", methods=["GET", "POST"])
@@ -103,13 +129,13 @@ def obter_estatisticas():
         ultima = lista_conexoes[-1]
         centro_lat = ultima["lat"]
         centro_lon = ultima["lon"]
-        zoom = 15  # Zoom de rua para exibir exatamente o local na tabela e mapa
+        zoom = 13  # Zoom detalhado da região do IP
 
     for c in reversed(lista_conexoes):
         ultimas_conexoes_html += f"""
         <tr>
             <td>🌍 {c['pais']}</td>
-            <td>🏙️ <b>{c['cidade']}</b><br><small style="color:var(--text-muted);">Bairro: {c['bairro']} | Rua: {c['rua']}</small></td>
+            <td>🏙️ <b>{c['cidade']} - {c['regiao']}</b><br><small style="color:var(--text-muted);">{c['bairro']} | IP: {c['ip']}</small></td>
             <td><span class="status-dot"></span> <span style="color:#4ade80;">Online</span></td>
             <td>{c['data_hora']}</td>
         </tr>
@@ -122,7 +148,7 @@ def obter_estatisticas():
             weight: 2,
             opacity: 1,
             fillOpacity: 0.95
-        }}).addTo(map).bindPopup("<b>Utilizador:</b> {c['usuario']}<br><b>Rua:</b> {c['rua']}<br><b>Bairro:</b> {c['bairro']}<br><b>Cidade:</b> {c['cidade']}");
+        }}).addTo(map).bindPopup("<b>Utilizador:</b> {c['usuario']}<br><b>Cidade:</b> {c['cidade']}, {c['regiao']}<br><b>Info Rede:</b> {c['bairro']}<br><b>IP:</b> {c['ip']}");
         """
 
     total_verif = len(stats_data["conexoes_ativas"])
@@ -381,7 +407,7 @@ def obter_estatisticas():
             <header>
                 <div class="header-title">
                     <h1>Painel de Monitoramento</h1>
-                    <p>Gestão de Licenças e Robôs em Tempo Real</p>
+                    <p>Gestão de Licenças e Robôs em Tempo Real (GPS por IP Ativo)</p>
                 </div>
                 <div class="header-right">
                     <div class="badge-online">ONLINE</div>
@@ -435,7 +461,7 @@ def obter_estatisticas():
                         <div style="margin-top: 25px;">
                             <h3 style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase;">Versão da API</h3>
                             <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
-                                <span>API v1.9 (FastAPI)</span>
+                                <span>API v2.0 (GPS por IP)</span>
                                 <span style="color: var(--accent-green); font-weight: bold;">Estável</span>
                             </div>
                         </div>
@@ -449,7 +475,7 @@ def obter_estatisticas():
                             <thead>
                                 <tr>
                                     <th>País</th>
-                                    <th>Localização</th>
+                                    <th>Localização & Rede</th>
                                     <th>Status</th>
                                     <th>Horário</th>
                                 </tr>
