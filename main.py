@@ -4,6 +4,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 import secrets
 from datetime import datetime
 import uvicorn
+import os
 
 app = FastAPI()
 
@@ -602,10 +603,9 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
 
             {marcadores_js}
 
-            // Inserir os mesmos marcadores no mapa expandido
             setTimeout(function() {{
                 {marcadores_js.replace("addTo(map)", "addTo(mapExpanded)")}
-            }, 100);
+            }}, 100);
 
             function switchTab(tabId, element) {{
                 document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
@@ -614,11 +614,10 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 document.getElementById(tabId).classList.add('active');
                 element.classList.add('active');
 
-                // Ajustar tamanho dos mapas ao mudar de aba para evitar bugs visuais do Leaflet
                 setTimeout(function() {{
                     map.invalidateSize();
                     mapExpanded.invalidateSize();
-                }, 200);
+                }}, 200);
             }}
         </script>
     </body>
@@ -626,6 +625,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
     """
     return html_content
 
-# Bloco de execução direta para garantir que o servidor sobe sem erros
+# Bloco local (caso queira testar na sua máquina)
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="127.0.0.1", port=port, reload=True)
