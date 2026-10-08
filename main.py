@@ -8,9 +8,9 @@ app = FastAPI()
 
 security = HTTPBasic()
 
-# Credenciais de Administrador exclusivas para o seu acesso ao relatório
-ADMIN_USER = "Adm_adm"
-ADMIN_PASS = "09870987"
+# Novas credenciais de Administrador exclusivas para o seu acesso
+ADMIN_USER = "Adm_Master"
+ADMIN_PASS = "R@oyal0987"
 
 def verificar_admin(credentials: HTTPBasicCredentials = Depends(security)):
     is_user_ok = secrets.compare_digest(credentials.username, ADMIN_USER)
@@ -60,7 +60,6 @@ async def verificar_licenca(request: Request):
 
     ip_cliente = ip_bruto.split(",")[0].strip() if ip_bruto else "Desconhecido"
 
-    # Padrão estável e seguro para teste gratuito (Campinas/SP)
     pais = "Brasil"
     cidade = "Campinas"
     regiao = "São Paulo"
@@ -74,7 +73,6 @@ async def verificar_licenca(request: Request):
     
     localizacao_completa = f"{cidade} - {regiao}"
     
-    # Registo único por utilizador
     stats_data["conexoes_ativas"][usuario] = {
         "usuario": usuario,
         "ip": ip_cliente,
@@ -535,7 +533,7 @@ def obter_estatisticas():
                         <div style="margin-top: 25px;">
                             <h3 style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase;">Versão da API</h3>
                             <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
-                                <span>API v2.2 (Secure Reports)</span>
+                                <span>API v2.3 (Secure Admin)</span>
                                 <span style="color: var(--accent-green); font-weight: bold;">Estável</span>
                             </div>
                         </div>
