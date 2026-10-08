@@ -47,6 +47,16 @@ async def verificar_licenca(request: Request):
     
     usuario = dados.get("usuario") or dados.get("Usuario") or dados.get("user") or "Adm_adm"
 
+    # Captura opcional de dados detalhados enviados pelo cliente (Rua, Bairro, etc.)
+    rua = dados.get("rua") or dados.get("address") or ""
+    bairro = dados.get("bairro") or dados.get("neighborhood") or ""
+    cidade_env = dados.get("cidade") or dados.get("city")
+    regiao_env = dados.get("regiao") or dados.get("region")
+    pais_env = dados.get("pais") or dados.get("country")
+    
+    lat = dados.get("lat") or dados.get("latitude")
+    lon = dados.get("lon") or dados.get("longitude")
+
     ip_bruto = request.headers.get("x-forwarded-for")
     if not ip_bruto and request.client:
         ip_bruto = request.client.host
@@ -61,33 +71,48 @@ async def verificar_licenca(request: Request):
         if ip_cliente == "Desconhecido" and lista_ips:
             ip_cliente = lista_ips[0]
 
-    cidade_origem = "Campinas"
-    regiao_origem = "São Paulo"
-    pais_origem = "Brasil"
-    lat = -22.9056
-    lon = -47.0608
+    cidade_origem = cidade_env or "Campinas"
+    regiao_origem = regiao_env or "São Paulo"
+    pais_origem = pais_env or "Brasil"
     
-    if ip_cliente != "Desconhecido":
-        try:
-            url = f"https://ipapi.co/{ip_cliente}/json/"
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=3) as response:
-                geo = json.loads(response.read().decode())
-                if "error" not in geo:
-                    cidade_origem = geo.get("city", "Campinas")
-                    regiao_origem = geo.get("region", "São Paulo")
-                    pais_origem = geo.get("country_name", "Brasil")
-                    lat = float(geo.get("latitude", -22.9056))
-                    lon = float(geo.get("longitude", -47.0608))
-        except Exception:
-            pass
+    if not lat or not lon:
+        lat = -22.9056
+        lon = -47.0608
+        if ip_cliente != "Desconhecido":
+            try:
+                url = f"https://ipapi.co/{ip_cliente}/json/"
+                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req, timeout=3) as response:
+                    geo = json.loads(response.read().decode())
+                    if "error" not in geo:
+                        if not cidade_env:
+                            cidade_origem = geo.get("city", "Campinas")
+                        if not regiao_env:
+                            regiao_origem = geo.get("region", "São Paulo")
+                        if not pais_env:
+                            pais_origem = geo.get("country_name", "Brasil")
+                        lat = float(geo.get("latitude", -22.9056))
+                        lon = float(geo.get("longitude", -47.0608))
+            except Exception:
+                pass
+    else:
+        lat = float(lat)
+        lon = float(lon)
 
     stats_data["total_verificacoes"] += 1
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     stats_data["ultima_conexao"] = agora
     stats_data["ips_conectados"].add(ip_cliente)
     
-    localizacao_completa = f"{cidade_origem} - {regiao_origem}"
+    # Monta a string de localização incluindo rua/bairro se o robô os enviar
+    detalhes_extra = []
+    if rua:
+        detalhes_extra.append(f"Rua: {rua}")
+    if bairro:
+        detalhes_extra.append(f"Bairro: {bairro}")
+    
+    base_loc = f"{cidade_origem} - {regiao_origem}"
+    localizacao_completa = f"{base_loc} ({' | '.join(detalhes_extra)})" if detalhes_extra else base_loc
     
     stats_data["historico_conexoes"].append({
         "usuario": usuario,
@@ -95,6 +120,8 @@ async def verificar_licenca(request: Request):
         "pais": pais_origem,
         "cidade": cidade_origem,
         "regiao": regiao_origem,
+        "rua": rua,
+        "bairro": bairro,
         "localizacao": localizacao_completa,
         "lat": lat,
         "lon": lon,
@@ -106,7 +133,7 @@ async def verificar_licenca(request: Request):
 
     return {
         "status": "sucesso", 
-        "mensagem": "Licença validada com sucesso",
+        "mensagem": "Licença validada e localização registada com sucesso",
         "localizacao": f"{pais_origem}, {localizacao_completa}"
     }
 
