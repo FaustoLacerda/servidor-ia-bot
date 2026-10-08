@@ -24,7 +24,7 @@ stats_data = {
     "total_experiencias_enviadas": 0,
     "ultima_conexao": None,
     "ips_conectados": set(),
-    "historico_conexoes": []
+    "conexoes_ativas": {}  # Dicionário para controlar utilizadores únicos e evitar duplicação
 }
 
 @app.api_route("/api/v1/verificar-licenca", methods=["GET", "POST"])
@@ -47,15 +47,16 @@ async def verificar_licenca(request: Request):
     
     usuario = dados.get("usuario") or dados.get("Usuario") or dados.get("user") or "Adm_adm"
 
-    # Captura opcional de dados detalhados enviados pelo cliente (Rua, Bairro, etc.)
+    # Captura opcional de dados detalhados enviados pelo cliente
     rua = dados.get("rua") or dados.get("address") or ""
     bairro = dados.get("bairro") or dados.get("neighborhood") or ""
     cidade_env = dados.get("cidade") or dados.get("city")
     regiao_env = dados.get("regiao") or dados.get("region")
     pais_env = dados.get("pais") or dados.get("country")
     
-    lat = dados.get("lat") or dados.get("latitude")
-    lon = dados.get("lon") or dados.get("longitude")
+    # Captura de coordenadas exatas enviadas pelo robô (com fallback para valores padrão se ausentes)
+    lat = dados.get("latitude") or dados.get("lat")
+    lon = dados.get("longitude") or dados.get("lon")
 
     ip_bruto = request.headers.get("x-forwarded-for")
     if not ip_bruto and request.client:
@@ -104,7 +105,6 @@ async def verificar_licenca(request: Request):
     stats_data["ultima_conexao"] = agora
     stats_data["ips_conectados"].add(ip_cliente)
     
-    # Monta a string de localização incluindo rua/bairro se o robô os enviar
     detalhes_extra = []
     if rua:
         detalhes_extra.append(f"Rua: {rua}")
@@ -114,7 +114,8 @@ async def verificar_licenca(request: Request):
     base_loc = f"{cidade_origem} - {regiao_origem}"
     localizacao_completa = f"{base_loc} ({' | '.join(detalhes_extra)})" if detalhes_extra else base_loc
     
-    stats_data["historico_conexoes"].append({
+    # REGISTRO ÚNICO POR UTILIZADOR (Evita duplicação de licenças e acessos no painel)
+    stats_data["conexoes_ativas"][usuario] = {
         "usuario": usuario,
         "ip": ip_cliente,
         "pais": pais_origem,
@@ -126,10 +127,7 @@ async def verificar_licenca(request: Request):
         "lat": lat,
         "lon": lon,
         "data_hora": agora
-    })
-    
-    if len(stats_data["historico_conexoes"]) > 50:
-        stats_data["historico_conexoes"].pop(0)
+    }
 
     return {
         "status": "sucesso", 
@@ -151,13 +149,15 @@ def obter_estatisticas():
     centro_lon = -47.0608
     zoom = 4
 
-    if stats_data["historico_conexoes"]:
-        ultima = stats_data["historico_conexoes"][-1]
+    lista_conexoes = list(stats_data["conexoes_ativas"].values())
+
+    if lista_conexoes:
+        ultima = lista_conexoes[-1]
         centro_lat = ultima["lat"]
         centro_lon = ultima["lon"]
-        zoom = 5
+        zoom = 12  # Zoom mais próximo para destacar a localização exata no mapa
 
-    for c in reversed(stats_data["historico_conexoes"]):
+    for c in reversed(lista_conexoes):
         ultimas_conexoes_html += f"""
         <tr>
             <td>🌍 {c['pais']}</td>
@@ -166,9 +166,10 @@ def obter_estatisticas():
             <td>{c['data_hora']}</td>
         </tr>
         """
+        # Adiciona o marcador dinâmico utilizando a latitude e longitude exatas recebidas do bot
         marcadores_js += f"""
         L.circleMarker([{c['lat']}, {c['lon']}], {{
-            radius: 9,
+            radius: 10,
             fillColor: "#4ade80",
             color: "#ffffff",
             weight: 2,
@@ -177,7 +178,7 @@ def obter_estatisticas():
         }}).addTo(map).bindPopup("<b>Utilizador:</b> {c['usuario']}<br><b>Local:</b> {c['localizacao']}, {c['pais']}<br><b>IP:</b> {c['ip']}");
         """
 
-    total_verif = stats_data["total_verificacoes"]
+    total_verif = len(stats_data["conexoes_ativas"])  # Licenças ativas reais baseadas em utilizadores únicos
     total_exp = stats_data["total_experiencias_enviadas"]
     total_ips = len(stats_data["ips_conectados"])
     ultima_conn = stats_data["ultima_conexao"] or "Nenhuma"
@@ -487,7 +488,7 @@ def obter_estatisticas():
                         <div style="margin-top: 25px;">
                             <h3 style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase;">Versão da API</h3>
                             <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
-                                <span>API v1.0 (FastAPI)</span>
+                                <span>API v1.9 (FastAPI)</span>
                                 <span style="color: var(--accent-green); font-weight: bold;">Estável</span>
                             </div>
                         </div>
