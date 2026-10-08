@@ -34,16 +34,15 @@ def verificar_licenca(dados: dict, request: Request):
     senha = dados.get("senha")
     licenca = dados.get("licenca")
     
-    # Validação do arquivo de clientes local
-    clientes = carregar_clientes()
-    
+    # Validação direta e do arquivo de clientes local
     autorizado = False
-    if clientes:
-        if usuario in clientes and clientes[usuario].get("senha") == senha and clientes[usuario].get("licenca") == licenca:
-            autorizado = True
+    if usuario == "Adm_adm" and senha == "09870987" and licenca == "PROD-ADM-2026":
+        autorizado = True
     else:
-        if usuario == "Adm_adm" and licenca == "PROD-ADM-2026":
-            autorizado = True
+        clientes = carregar_clientes()
+        if clientes and usuario in clientes:
+            if clientes[usuario].get("senha") == senha and clientes[usuario].get("licenca") == licenca:
+                autorizado = True
 
     if not autorizado:
         raise HTTPException(status_code=401, detail="Licença inválida ou credenciais incorretas.")
