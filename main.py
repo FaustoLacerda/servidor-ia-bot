@@ -65,8 +65,8 @@ async def verificar_licenca(request: Request):
     cidade_origem = "Desconhecida"
     pais_origem = "Desconhecido"
     bairro_origem = "Desconhecido"
-    lat = -22.9056
-    lon = -47.0608
+    lat = -14.2350
+    lon = -51.9253
     
     if ip_cliente != "Desconhecido":
         try:
@@ -78,8 +78,8 @@ async def verificar_licenca(request: Request):
                     cidade_origem = geo_resposta.get("city", "Desconhecida")
                     pais_origem = geo_resposta.get("country", "Desconhecido")
                     bairro_origem = geo_resposta.get("district") or "Desconhecido"
-                    lat = geo_resposta.get("lat", -22.9056)
-                    lon = geo_resposta.get("lon", -47.0608)
+                    lat = geo_resposta.get("lat", -14.2350)
+                    lon = geo_resposta.get("lon", -51.9253)
         except Exception:
             pass
 
@@ -113,14 +113,14 @@ async def registrar_experiencia(request: Request):
     stats_data["total_experiencias_enviadas"] += 1
     return {"status": "registrado", "mensagem": "Experiência absorvida."}
 
-# DASHBOARD PROFISSIONAL COMPLETO (DARK MODE FUTURISTA)
 @app.get("/api/v1/stats", response_class=HTMLResponse)
 def obter_estatisticas():
     ultimas_conexoes_html = ""
     marcadores_js = ""
     
-    centro_lat = -22.9056
-    centro_lon = -47.0608
+    # Coordenadas padrão centradas no Brasil caso o histórico esteja vazio
+    centro_lat = -14.2350
+    centro_lon = -51.9253
     zoom = 4
 
     if stats_data["historico_conexoes"]:
@@ -178,7 +178,6 @@ def obter_estatisticas():
                 height: 100vh;
                 overflow: hidden;
             }}
-            /* Sidebar */
             aside {{
                 width: 240px;
                 background-color: var(--bg-sidebar);
@@ -218,7 +217,6 @@ def obter_estatisticas():
                 background-color: rgba(56, 189, 248, 0.1);
                 color: var(--accent-blue);
             }}
-            /* Main Content */
             .main-container {{
                 flex: 1;
                 display: flex;
@@ -274,7 +272,6 @@ def obter_estatisticas():
                 flex-direction: column;
                 gap: 25px;
             }}
-            /* Cards Grid */
             .cards-grid {{
                 display: grid;
                 grid-template-columns: repeat(4, 1fr);
@@ -307,7 +304,6 @@ def obter_estatisticas():
                 font-size: 24px;
                 color: rgba(56, 189, 248, 0.2);
             }}
-            /* Dashboard Center Grid */
             .dashboard-grid {{
                 display: grid;
                 grid-template-columns: 2fr 1fr;
@@ -331,10 +327,10 @@ def obter_estatisticas():
             }}
             #map {{
                 height: 380px;
+                width: 100%;
                 border-radius: 8px;
                 border: 1px solid var(--border-color);
             }}
-            /* Tables */
             .table-wrapper {{
                 overflow-x: auto;
             }}
@@ -487,6 +483,7 @@ def obter_estatisticas():
 
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
+            // Inicializa o mapa com correção de carregamento visual
             var map = L.map('map', {{ zoomControl: false }}).setView([{centro_lat}, {centro_lon}], {zoom});
             L.control.zoom({{ position: 'bottomright' }}).addTo(map);
             
@@ -496,6 +493,9 @@ def obter_estatisticas():
             }}).addTo(map);
 
             {marcadores_js}
+
+            // Força o redimensionamento para garantir que os tiles do mapa apareçam sempre
+            setTimeout(function(){{ map.invalidateSize(); }}, 200);
         </script>
     </body>
     </html>
