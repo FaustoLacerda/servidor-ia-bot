@@ -7,7 +7,6 @@ import urllib.error
 
 app = FastAPI()
 
-# Caminho para o arquivo de clientes
 CLIENTES_FILE = "clientes.json"
 
 def carregar_clientes():
@@ -19,7 +18,6 @@ def carregar_clientes():
     except Exception:
         return {}
 
-# Variáveis globais para estatísticas e rastreio
 stats_data = {
     "total_verificacoes": 0,
     "total_experiencias_enviadas": 0,
@@ -29,14 +27,19 @@ stats_data = {
 }
 
 @app.post("/api/v1/verificar-licenca")
-def verificar_licenca(dados: dict, request: Request):
-    usuario = dados.get("usuario")
-    senha = dados.get("senha")
-    licenca = dados.get("licenca")
+async def verificar_licenca(request: Request):
+    try:
+        dados = await request.json()
+    except Exception:
+        dados = {}
     
-    # Validação direta e do arquivo de clientes local
+    usuario = dados.get("usuario") or dados.get("Usuario") or "Desconhecido"
+    senha = dados.get("senha") or dados.get("Senha") or ""
+    licenca = dados.get("licenca") or dados.get("Licenca") or ""
+    
+    # Validação flexível e direta para o administrador
     autorizado = False
-    if usuario == "Adm_adm" and senha == "09870987" and licenca == "PROD-ADM-2026":
+    if str(usuario).strip() == "Adm_adm" and str(senha).strip() == "09870987" and str(licenca).strip() == "PROD-ADM-2026":
         autorizado = True
     else:
         clientes = carregar_clientes()
@@ -45,12 +48,11 @@ def verificar_licenca(dados: dict, request: Request):
                 autorizado = True
 
     if not autorizado:
+        print(f"AVISO: Tentativa de acesso negado para usuário: {usuario} com dados: {dados}")
         raise HTTPException(status_code=401, detail="Licença inválida ou credenciais incorretas.")
 
-    # Captura do IP do cliente
     ip_cliente = request.client.forwarded_for or request.client.host
     
-    # Consulta de geolocalização nativa (sem dependência externa)
     cidade_origem = "Desconhecida"
     pais_origem = "Desconhecido"
     try:
@@ -64,13 +66,11 @@ def verificar_licenca(dados: dict, request: Request):
     except Exception:
         pass
 
-    # Atualização das estatísticas globais
     stats_data["total_verificacoes"] += 1
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     stats_data["ultima_conexao"] = agora
     stats_data["ips_conectados"].add(ip_cliente)
     
-    # Registo detalhado no histórico recente
     stats_data["historico_conexoes"].append({
         "usuario": usuario,
         "ip": ip_cliente,
@@ -79,7 +79,6 @@ def verificar_licenca(dados: dict, request: Request):
         "data_hora": agora
     })
     
-    # Mantém apenas os últimos 50 registos no histórico
     if len(stats_data["historico_conexoes"]) > 50:
         stats_data["historico_conexoes"].pop(0)
 
@@ -92,12 +91,14 @@ def verificar_licenca(dados: dict, request: Request):
     }
 
 @app.post("/api/v1/experiencia")
-def registrar_experiencia(dados: dict):
+async def registrar_experiencia(request: Request):
+    try:
+        dados = await request.json()
+    except Exception:
+        dados = {}
     stats_data["total_experiencias_enviadas"] += 1
-    print(f"INFO: TradingServer - Experiência recebida: {dados}")
-    return {"status": "registrado", "mensagem": "Experiência absorvida pela IA central."}
+    return {"status": "registrado", "mensagem": "Experiência absorvida."}
 
-# ENDPOINT DE ESTATÍSTICAS E MONITORIZAÇÃO
 @app.get("/api/v1/stats")
 def obter_estatisticas():
     return {
