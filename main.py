@@ -65,10 +65,13 @@ async def verificar_licenca(request: Request):
     cidade_origem = "Desconhecida"
     pais_origem = "Desconhecido"
     bairro_origem = "Desconhecido"
+    lat = -14.2350  # Padrão centro do Brasil caso falhe
+    lon = -51.9253
     
     if ip_cliente != "Desconhecido":
         try:
-            url = f"http://ip-api.com/json/{ip_cliente}?fields=status,country,city,district"
+            # Pedimos também latitude (lat) e longitude (lon)
+            url = f"http://ip-api.com/json/{ip_cliente}?fields=status,country,city,district,lat,lon"
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
             with urllib.request.urlopen(req, timeout=3) as response:
                 geo_resposta = json.loads(response.read().decode())
@@ -76,6 +79,8 @@ async def verificar_licenca(request: Request):
                     cidade_origem = geo_resposta.get("city", "Desconhecida")
                     pais_origem = geo_resposta.get("country", "Desconhecido")
                     bairro_origem = geo_resposta.get("district") or "Desconhecido"
+                    lat = geo_resposta.get("lat", -14.2350)
+                    lon = geo_resposta.get("lon", -51.9253)
         except Exception:
             pass
 
@@ -90,6 +95,8 @@ async def verificar_licenca(request: Request):
         "pais": pais_origem,
         "cidade": cidade_origem,
         "bairro": bairro_origem,
+        "lat": lat,
+        "lon": lon,
         "data_hora": agora
     })
     
@@ -107,10 +114,22 @@ async def registrar_experiencia(request: Request):
     stats_data["total_experiencias_enviadas"] += 1
     return {"status": "registrado", "mensagem": "Experiência absorvida."}
 
-# ENDPOINT DE ESTATÍSTICAS COM DASHBOARD VISUAL E MAPA MUNDIAL
 @app.get("/api/v1/stats", response_class=HTMLResponse)
 def obter_estatisticas():
     ultimas_conexoes_html = ""
+    marcadores_js = ""
+    
+    # Pega a última coordenada válida para centralizar o mapa
+    centro_lat = -14.2350
+    centro_lon = -51.9253
+    zoom = 3
+
+    if stats_data["historico_conexoes"]:
+        ultima = stats_data["historico_conexoes"][-1]
+        centro_lat = ultima["lat"]
+        centro_lon = ultima["lon"]
+        zoom = 10
+
     for c in reversed(stats_data["historico_conexoes"]):
         ultimas_conexoes_html += f"""
         <tr>
@@ -121,6 +140,10 @@ def obter_estatisticas():
             <td>📍 {c['bairro']}</td>
             <td>🕒 {c['data_hora']}</td>
         </tr>
+        """
+        marcadores_js += f"""
+        L.marker([{c['lat']}, {c['lon']}]).addTo(map)
+            .bindPopup("<b>Utilizador:</b> {c['usuario']}<br><b>Cidade:</b> {c['cidade']}, {c['pais']}<br><b>IP:</b> {c['ip']}");
         """
 
     html_content = f"""
@@ -275,14 +298,13 @@ def obter_estatisticas():
 
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
-            var map = L.map('map').setView([20, 0], 2);
+            var map = L.map('map').setView([{centro_lat}, {centro_lon}], {zoom});
             L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{s}}/{{z}}/{{x}}/{{y}}{{r}}.png', {{
                 attribution: '&copy; OpenStreetMap & CARTO',
                 maxZoom: 19
             }}).addTo(map);
 
-            // Adiciona marcador global de exemplo ou via geocodificação dinâmica do IP
-            // Aqui exibe o mapa base escuro interativo pronto para receber os pontos
+            {marcadores_js}
         </script>
     </body>
     </html>
