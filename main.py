@@ -877,11 +877,10 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
 
             {marcadores_js}
 
-            // Copiar marcadores para o segundo mapa expandido
             setTimeout(function() {{
                 map.invalidateSize();
                 mapExpanded.invalidateSize();
-            }, 300);
+            }}, 300);
 
             function switchTab(tabId, element) {{
                 document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
@@ -906,7 +905,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 setTimeout(function() {{
                     map.invalidateSize();
                     mapExpanded.invalidateSize();
-                }, 200);
+                }}, 200);
             }}
 
             async function adicionarCredito(usuario) {{
