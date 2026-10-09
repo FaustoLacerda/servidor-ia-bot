@@ -267,7 +267,6 @@ async def receber_relatorio_usuario(request: Request):
     lucro = float(dados.get("lucro", 0.0))
     banca = float(dados.get("banca", 0.0))
     
-    # NOVOS CAMPOS OPCIONAIS PARA SINCRONIZAÇÃO TOTAL DO HISTÓRICO
     vitorias = dados.get("vitorias")
     derrotas = dados.get("derrotas")
     lucro_total_acomp = dados.get("lucro_total")
@@ -291,14 +290,12 @@ async def receber_relatorio_usuario(request: Request):
     user_data["banca_atual"] = banca if banca > 0 else user_data.get("banca_atual", 0.0)
     user_data["ultima_atualizacao"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Se o robô enviou os totais consolidados diretamente, substitui e atualiza com precisão absoluta
     if vitorias is not None and derrotas is not None and lucro_total_acomp is not None:
         user_data["operacoes_vencedoras"] = int(vitorias)
         user_data["operacoes_perdedoras"] = int(derrotas)
         user_data["lucro_total"] = float(lucro_total_acomp)
         user_data["prejuizo_total"] = float(prejuizo_total_acomp)
     else:
-        # Modo incremental por operação isolada
         if lucro >= 0:
             user_data["lucro_total"] += lucro
             if lucro > 0:
@@ -816,10 +813,10 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                                 <thead>
                                     <tr>
                                         <th>Utilizador</th>
-                                        <th>Saldo Pré-Pago (Carteira)</th>
-                                        <th>Comissão Gerada (5%)</th>
+                                        <th>Saldo Pré-Pago</th>
+                                        <th>Comissão Acumulada</th>
                                         <th>Estado do Robô</th>
-                                        <th>Ação Administrativa</th>
+                                        <th>Ações Administrativas</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -833,7 +830,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 <!-- ABA 4: MAPA MUNDIAL -->
                 <div id="mapa" class="tab-content">
                     <div class="panel">
-                        <h2><i class="fa-solid fa-globe" style="color: var(--accent-blue);"></i> Vista Expandida do Mapa Global</h2>
+                        <h2><i class="fa-solid fa-globe" style="color: var(--accent-blue);"></i> Geolocalização Global de Clientes</h2>
                         <div id="map-expanded"></div>
                     </div>
                 </div>
@@ -841,19 +838,19 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 <!-- ABA 5: CONEXÕES -->
                 <div id="conexoes" class="tab-content">
                     <div class="panel">
-                        <h2><i class="fa-solid fa-network-wired" style="color: var(--accent-blue);"></i> Registo Completo de Conexões</h2>
+                        <h2><i class="fa-solid fa-network-wired" style="color: var(--accent-blue);"></i> Histórico Completo de Conexões de Rede</h2>
                         <div class="table-wrapper">
                             <table>
                                 <thead>
                                     <tr>
                                         <th>País</th>
-                                        <th>Localização & IP</th>
-                                        <th>Status</th>
-                                        <th>Horário</th>
+                                        <th>Localização e IP</th>
+                                        <th>Status de Rede</th>
+                                        <th>Último Sinais</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {ultimas_conexoes_html if ultimas_conexoes_html else '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">A aguardar conexões...</td></tr>'}
+                                    {ultimas_conexoes_html if ultimas_conexoes_html else '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">Nenhuma conexão registada.</td></tr>'}
                                 </tbody>
                             </table>
                         </div>
@@ -862,31 +859,62 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
             </div>
 
             <footer>
-                Servidor de Licenciamento & Inteligência &bull; Todos os direitos reservados &copy; 2026
+                Servidor Central de Inteligência Artificial &copy; 2026 — Todos os direitos reservados.
             </footer>
         </main>
 
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
+            var map = L.map('map').setView([{centro_lat}, {centro_lon}], 4);
+            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                maxZoom: 18,
+            }}).addTo(map);
+
+            var mapExpanded = L.map('map-expanded').setView([{centro_lat}, {centro_lon}], 4);
+            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                maxZoom: 18,
+            }}).addTo(mapExpanded);
+
+            {marcadores_js}
+
+            // Copiar marcadores para o segundo mapa expandido
+            setTimeout(function() {{
+                map.invalidateSize();
+                mapExpanded.invalidateSize();
+            }, 300);
+
             function switchTab(tabId, element) {{
-                document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
-                document.querySelectorAll('.menu-item').forEach(item => item.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+                document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
                 
                 document.getElementById(tabId).classList.add('active');
                 element.classList.add('active');
-                
-                setTimeout(() => {{
+
+                const titles = {{
+                    'visao-geral': ['Painel de Monitoramento', 'Gestão de Licenças e Créditos em Tempo Real'],
+                    'relatorios': ['Relatórios de Desempenho', 'Análise detalhada de lucros, bancas e operadoras'],
+                    'financeiro': ['Controlo Financeiro & Créditos', 'Gestão de carteiras e saldos pré-pagos dos clientes'],
+                    'mapa': ['Mapa Mundial de Clientes', 'Localização geográfica exata dos terminais conectados'],
+                    'conexoes': ['Registo de Conexões', 'Monitoramento ativo de IPs e endereços de rede']
+                }};
+
+                if(titles[tabId]) {{
+                    document.getElementById('header-title-text').innerText = titles[tabId][0];
+                    document.getElementById('header-subtitle-text').innerText = titles[tabId][1];
+                }}
+
+                setTimeout(function() {{
                     map.invalidateSize();
                     mapExpanded.invalidateSize();
-                }}, 200);
+                }, 200);
             }}
 
             async function adicionarCredito(usuario) {{
-                let valorStr = prompt("Digite o valor de créditos a adicionar para o utilizador " + usuario + " (ex: 50.00):");
-                if (!valorStr) return;
+                let valorStr = prompt("Digite o valor de crédito a adicionar para " + usuario + " (ex: 50.0):");
+                if(!valorStr) return;
                 let valor = parseFloat(valorStr);
-                if (isNaN(valor) || valor <= 0) {{
-                    alert("Valor inválido!");
+                if(isNaN(valor) || valor <= 0) {{
+                    alert("Valor inválido.");
                     return;
                 }}
 
@@ -897,32 +925,16 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                         body: JSON.stringify({{ usuario: usuario, valor: valor }})
                     }});
                     let result = await response.json();
-                    if (response.ok) {{
-                        alert("Sucesso! Novo saldo de créditos: R$ " + result.novo_saldo.toFixed(2));
+                    if(response.ok) {{
+                        alert(result.mensagem + " Novo saldo: R$ " + result.novo_saldo);
                         location.reload();
                     }} else {{
-                        alert("Erro: " + (result.detail || "Não foi possível adicionar créditos."));
+                        alert("Erro: " + (result.detail || "Falha ao adicionar créditos"));
                     }}
-                }} catch (err) {{
-                    alert("Erro de conexão com o servidor.");
+                }} catch(err) {{
+                    alert("Erro de conexão ao servidor.");
                 }}
             }}
-
-            const map = L.map('map').setView([{centro_lat}, {centro_lon}], 11);
-            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                maxZoom: 19
-            }}).addTo(map);
-
-            const mapExpanded = L.map('map-expanded').setView([{centro_lat}, {centro_lon}], 11);
-            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                maxZoom: 19
-            }}).addTo(mapExpanded);
-
-            {marcadores_js}
-            
-            setTimeout(() => {{
-                {marcadores_js.replace("addTo(map)", "addTo(mapExpanded)")}
-            }}, 100);
         </script>
     </body>
     </html>
@@ -930,5 +942,4 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
     return html_content
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
