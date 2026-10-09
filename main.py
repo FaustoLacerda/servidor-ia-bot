@@ -820,7 +820,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {linhas_financeiro_html if linhas_financeiro_html else '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">Nenhum registo financeiro encontrado.</td></tr>'}
+                                    {linhas_financeiro_html if linhas_financeiro_html else '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">Nenhum utilizador registado no financeiro.</td></tr>'}
                                 </tbody>
                             </table>
                         </div>
@@ -838,49 +838,42 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 <!-- ABA 5: CONEXÕES -->
                 <div id="conexoes" class="tab-content">
                     <div class="panel">
-                        <h2><i class="fa-solid fa-network-wired" style="color: var(--accent-blue);"></i> Histórico Completo de Conexões de Rede</h2>
+                        <h2><i class="fa-solid fa-network-wired" style="color: var(--accent-blue);"></i> Registo Detalhado de Conexões Ativas</h2>
                         <div class="table-wrapper">
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>País</th>
-                                        <th>Localização e IP</th>
-                                        <th>Status de Rede</th>
-                                        <th>Último Sinais</th>
+                                        <th>Utilizador</th>
+                                        <th>Endereço IP</th>
+                                        <th>Localização Geográfica</th>
+                                        <th>Última Sincronização</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {ultimas_conexoes_html if ultimas_conexoes_html else '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">Nenhuma conexão registada.</td></tr>'}
+                                    {ultimas_conexoes_html if ultimas_conexoes_html else '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">Sem conexões ativas.</td></tr>'}
                                 </tbody>
                             </table>
                         </div>
                     </div>
                 </div>
-            </div>
 
+            </div>
             <footer>
-                Servidor Central de Inteligência Artificial &copy; 2026 — Todos os direitos reservados.
+                Servidor de IA Centralizado &copy; 2026 - Todos os direitos reservados.
             </footer>
         </main>
 
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
-            var map = L.map('map').setView([{centro_lat}, {centro_lon}], 4);
+            let map = L.map('map').setView([{centro_lat}, {centro_lon}], 4);
             L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
                 maxZoom: 18,
+                attribution: '&copy; OpenStreetMap contributors'
             }}).addTo(map);
 
-            var mapExpanded = L.map('map-expanded').setView([{centro_lat}, {centro_lon}], 4);
-            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                maxZoom: 18,
-            }}).addTo(mapExpanded);
+            let mapExpanded = null;
 
             {marcadores_js}
-
-            setTimeout(function() {{
-                map.invalidateSize();
-                mapExpanded.invalidateSize();
-            }}, 300);
 
             function switchTab(tabId, element) {{
                 document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
@@ -891,10 +884,10 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
 
                 const titles = {{
                     'visao-geral': ['Painel de Monitoramento', 'Gestão de Licenças e Créditos em Tempo Real'],
-                    'relatorios': ['Relatórios de Desempenho', 'Análise detalhada de lucros, bancas e operadoras'],
-                    'financeiro': ['Controlo Financeiro & Créditos', 'Gestão de carteiras e saldos pré-pagos dos clientes'],
-                    'mapa': ['Mapa Mundial de Clientes', 'Localização geográfica exata dos terminais conectados'],
-                    'conexoes': ['Registo de Conexões', 'Monitoramento ativo de IPs e endereços de rede']
+                    'relatorios': ['Relatórios de Desempenho', 'Histórico e Estatísticas de Operações dos Clientes'],
+                    'financeiro': ['Controlo Financeiro & Carteira', 'Gestão de Créditos Pré-Pagos e Comissões'],
+                    'mapa': ['Mapa Mundial de Clientes', 'Visualização Geográfica Global de Terminais Conectados'],
+                    'conexoes': ['Registo de Conexões', 'Monitoramento Ativo de IPs e Endereços de Clientes']
                 }};
 
                 if(titles[tabId]) {{
@@ -902,36 +895,43 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                     document.getElementById('header-subtitle-text').innerText = titles[tabId][1];
                 }}
 
-                setTimeout(function() {{
-                    map.invalidateSize();
-                    mapExpanded.invalidateSize();
-                }}, 200);
+                if (tabId === 'mapa') {{
+                    setTimeout(() => {{
+                        if (!mapExpanded) {{
+                            mapExpanded = L.map('map-expanded').setView([{centro_lat}, {centro_lon}], 4);
+                            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                                maxZoom: 18,
+                                attribution: '&copy; OpenStreetMap contributors'
+                            }}).addTo(mapExpanded);
+                            {marcadores_js.replace("addTo(map)", "addTo(mapExpanded)")}
+                        }} else {{
+                            mapExpanded.invalidateSize();
+                        }}
+                    }}, 200);
+                }}
             }}
 
             async function adicionarCredito(usuario) {{
-                let valorStr = prompt("Digite o valor de crédito a adicionar para " + usuario + " (ex: 50.0):");
+                let valorStr = prompt("Digite o valor de créditos (R$) a adicionar para " + usuario + ":", "50.00");
                 if(!valorStr) return;
                 let valor = parseFloat(valorStr);
                 if(isNaN(valor) || valor <= 0) {{
-                    alert("Valor inválido.");
+                    alert("Valor inválido!");
                     return;
                 }}
 
-                try {{
-                    let response = await fetch('/api/v1/admin/adicionar-credito', {{
-                        method: 'POST',
-                        headers: {{ 'Content-Type': 'application/json' }},
-                        body: JSON.stringify({{ usuario: usuario, valor: valor }})
-                    }});
-                    let result = await response.json();
-                    if(response.ok) {{
-                        alert(result.mensagem + " Novo saldo: R$ " + result.novo_saldo);
-                        location.reload();
-                    }} else {{
-                        alert("Erro: " + (result.detail || "Falha ao adicionar créditos"));
-                    }}
-                }} catch(err) {{
-                    alert("Erro de conexão ao servidor.");
+                let response = await fetch('/api/v1/admin/adicionar-credito', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ usuario: usuario, valor: valor }})
+                }});
+
+                if(response.ok) {{
+                    let resJson = await response.json();
+                    alert(resJson.mensagem);
+                    location.reload();
+                }} else {{
+                    alert("Erro ao adicionar créditos. Verifique as credenciais de admin.");
                 }}
             }}
         </script>
@@ -941,4 +941,4 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
     return html_content
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+    uvicorn.run("main:app", host="0.0.0.0", port=10000, reload=True)
