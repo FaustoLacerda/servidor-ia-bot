@@ -11,11 +11,9 @@ app = FastAPI()
 
 security = HTTPBasic()
 
-# Credenciais de Administrador para o seu acesso restrito
 ADMIN_USER = "Adm_Master"
 ADMIN_PASS = "R@oyal0987"
 
-# Ficheiros para persistência de dados
 DB_FILE = "dados_servidor.json"
 RELATORIOS_FILE = "dados_relatorios.json"
 
@@ -163,7 +161,7 @@ async def verificar_licenca(request: Request):
             "operacoes_vencedoras": 0,
             "operacoes_perdedoras": 0,
             "banca_atual": 0.0,
-            "saldo_creditos": 0.0,
+            "saldo_creditos": 50.00,
             "comissao_devida": 0.0,
             "status_robo": "ATIVO",
             "ultima_atualizacao": agora
@@ -173,9 +171,6 @@ async def verificar_licenca(request: Request):
     salvar_dados()
 
     user_info = relatorios_usuarios[usuario]
-    if user_info.get("saldo_creditos", 0) <= 0 and user_info.get("banca_atual", 0) > 0:
-        pass
-
     return {
         "status": "sucesso", 
         "mensagem": "Licença validada com sucesso",
@@ -212,7 +207,7 @@ async def heartbeat_robo(request: Request):
             "operacoes_vencedoras": 0,
             "operacoes_perdedoras": 0,
             "banca_atual": 0.0,
-            "saldo_creditos": 0.0,
+            "saldo_creditos": 50.00,
             "comissao_devida": 0.0,
             "status_robo": "ATIVO",
             "ultima_atualizacao": agora
@@ -271,6 +266,12 @@ async def receber_relatorio_usuario(request: Request):
 
     lucro = float(dados.get("lucro", 0.0))
     banca = float(dados.get("banca", 0.0))
+    
+    # NOVOS CAMPOS OPCIONAIS PARA SINCRONIZAÇÃO TOTAL DO HISTÓRICO
+    vitorias = dados.get("vitorias")
+    derrotas = dados.get("derrotas")
+    lucro_total_acomp = dados.get("lucro_total")
+    prejuizo_total_acomp = dados.get("prejuizo_total")
 
     if usuario not in relatorios_usuarios:
         relatorios_usuarios[usuario] = {
@@ -280,23 +281,31 @@ async def receber_relatorio_usuario(request: Request):
             "operacoes_vencedoras": 0,
             "operacoes_perdedoras": 0,
             "banca_atual": banca,
-            "saldo_creditos": 0.0,
+            "saldo_creditos": 50.00,
             "comissao_devida": 0.0,
             "status_robo": "ATIVO",
             "ultima_atualizacao": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
 
     user_data = relatorios_usuarios[usuario]
-    user_data["banca_atual"] = banca
+    user_data["banca_atual"] = banca if banca > 0 else user_data.get("banca_atual", 0.0)
     user_data["ultima_atualizacao"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    if lucro >= 0:
-        user_data["lucro_total"] += lucro
-        if lucro > 0:
-            user_data["operacoes_vencedoras"] += 1
+    # Se o robô enviou os totais consolidados diretamente, substitui e atualiza com precisão absoluta
+    if vitorias is not None and derrotas is not None and lucro_total_acomp is not None:
+        user_data["operacoes_vencedoras"] = int(vitorias)
+        user_data["operacoes_perdedoras"] = int(derrotas)
+        user_data["lucro_total"] = float(lucro_total_acomp)
+        user_data["prejuizo_total"] = float(prejuizo_total_acomp)
     else:
-        user_data["prejuizo_total"] += abs(lucro)
-        user_data["operacoes_perdedoras"] += 1
+        # Modo incremental por operação isolada
+        if lucro >= 0:
+            user_data["lucro_total"] += lucro
+            if lucro > 0:
+                user_data["operacoes_vencedoras"] += 1
+        else:
+            user_data["prejuizo_total"] += abs(lucro)
+            user_data["operacoes_perdedoras"] += 1
 
     salvar_relatorios()
     return {
@@ -350,7 +359,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 "operacoes_vencedoras": 0,
                 "operacoes_perdedoras": 0,
                 "banca_atual": 0.0,
-                "saldo_creditos": 0.0,
+                "saldo_creditos": 50.00,
                 "comissao_devida": 0.0,
                 "status_robo": "ATIVO",
                 "ultima_atualizacao": c["data_hora"]
@@ -396,7 +405,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
         cor_lucro = "#4ade80" if lucro_liquido >= 0 else "#f87171"
         sinal = "+" if lucro_liquido >= 0 else ""
         
-        saldo_cred = info.get("saldo_creditos", 0.0)
+        saldo_cred = info.get("saldo_creditos", 50.0)
         comissao_gerada = info.get("comissao_devida", 0.0)
         status_robo = info.get("status_robo", "ATIVO")
         cor_status = "#4ade80" if status_robo == "ATIVO" else "#f87171"
@@ -745,7 +754,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                             <div style="margin-top: 25px;">
                                 <h3 style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase;">Versão da API</h3>
                                 <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
-                                    <span>API v3.8 (Comissão & Créditos Dinâmicos)</span>
+                                    <span>API v3.9 (Sincronização de Histórico)</span>
                                     <span style="color: var(--accent-green); font-weight: bold;">Ativo</span>
                                 </div>
                             </div>
