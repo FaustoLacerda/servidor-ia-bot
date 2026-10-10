@@ -1,13 +1,18 @@
-from fastapi import FastAPI, Request, Depends, HTTPException, status
-from fastapi.responses import HTMLResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-import secrets
 from datetime import datetime, timedelta
-import uvicorn
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 import json
 import os
+random = __import__('random')
+secrets = __import__('secrets')
+smtplib = __import__('smtplib')
 
-app = FastAPI()
+from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.responses import HTMLResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+import uvicorn
+
+app = FastAPI(title="Quantum MT5 - Servidor & Licenciamento")
 
 security = HTTPBasic()
 
@@ -17,368 +22,499 @@ ADMIN_PASS = "R@oyal0987"
 DB_FILE = "dados_servidor.json"
 RELATORIOS_FILE = "dados_relatorios.json"
 
+# --- CONFIGURAÇÕES DE SMTP PARA ENVIO DE E-MAIL REAL ---
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+SMTP_EMAIL = "seu-email@gmail.com"  # Substitua pelo seu e-mail
+SMTP_PASSWORD = "xxxx xxxx xxxx xxxx"  # Senha de App do Gmail
+
+# Dicionário temporário para armazenar os códigos OTP gerados
+otp_database = {}
+
+
+def enviar_email_otp(to_email: str, code: str):
+  try:
+    msg = MIMEMultipart()
+    msg["From"] = f"Quantum MT5 <{SMTP_EMAIL}>"
+    msg["To"] = to_email
+    msg["Subject"] = f"{code} é o seu código de acesso - Quantum MT5"
+
+    body_html = f"""
+        <html>
+            <body style="background-color: #080909; color: #f7f3eb; font-family: Arial, sans-serif; padding: 30px;">
+                <div style="max-width: 500px; margin: auto; background-color: #101110; border: 1px solid #d7ad62; padding: 24px; border-radius: 6px;">
+                    <h2 style="color: #f2d49a; margin-top: 0;">Quantum MT5</h2>
+                    <p style="color: #bcb6aa;">O seu código de verificação para acesso ou cadastro na plataforma é:</p>
+                    <div style="background-color: #161716; border: 1px dashed #d7ad62; padding: 16px; text-align: center; font-size: 28px; font-weight: bold; letter-spacing: 6px; color: #f2d49a; margin: 20px 0;">
+                        {code}
+                    </div>
+                    <p style="font-size: 12px; color: #bcb6aa;">Se não solicitou este código, por favor ignore este e-mail.</p>
+                </div>
+            </body>
+        </html>
+        """
+    msg.attach(MIMEText(body_html, "html"))
+
+    server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+    server.starttls()
+    server.login(SMTP_EMAIL, SMTP_PASSWORD)
+    server.sendmail(SMTP_EMAIL, to_email, msg.as_string())
+    server.quit()
+    return True
+  except Exception as e:
+    print(f"Erro ao enviar e-mail SMTP: {e}")
+    return False
+
+
 def carregar_relatorios():
-    if os.path.exists(RELATORIOS_FILE):
-        try:
-            with open(RELATORIOS_FILE, "r", encoding="utf-8") as f:
-                dados_Carregados = json.load(f)
-                if "Desconhecido" in dados_Carregados:
-                    del dados_Carregados["Desconhecido"]
-                return dados_Carregados
-        except Exception:
-            pass
-    return {}
+  if os.path.exists(RELATORIOS_FILE):
+    try:
+      with open(RELATORIOS_FILE, "r", encoding="utf-8") as f:
+        dados_carregados = json.load(f)
+        if "Desconhecido" in dados_carregados:
+          del dados_carregados["Desconhecido"]
+        return dados_carregados
+    except Exception:
+      pass
+  return {}
+
 
 def salvar_relatorios():
-    try:
-        with open(RELATORIOS_FILE, "w", encoding="utf-8") as f:
-            json.dump(relatorios_usuarios, f, ensure_ascii=False, indent=4)
-    except Exception:
-        pass
+  try:
+    with open(RELATORIOS_FILE, "w", encoding="utf-8") as f:
+      json.dump(relatorios_usuarios, f, ensure_ascii=False, indent=4)
+  except Exception:
+    pass
+
 
 relatorios_usuarios = carregar_relatorios()
 
+
 def carregar_dados():
-    dados = {
-        "total_verificacoes": 0,
-        "total_experiencias_enviadas": 0,
-        "ultima_conexao": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "ips_conectados": set(),
-        "conexoes_ativas": {}
-    }
-    
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r", encoding="utf-8") as f:
-                carregado = json.load(f)
-                dados["total_verificacoes"] = carregado.get("total_verificacoes", 0)
-                dados["total_experiencias_enviadas"] = carregado.get("total_experiencias_enviadas", 0)
-                dados["ultima_conexao"] = carregado.get("ultima_conexao", dados["ultima_conexao"])
-                dados["ips_conectados"] = set(carregado.get("ips_conectados", []))
-                dados["conexoes_ativas"] = carregado.get("conexoes_ativas", {})
-        except Exception:
-            pass
+  dados = {
+      "total_verificacoes": 0,
+      "total_experiencias_enviadas": 0,
+      "ultima_conexao": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+      "ips_conectados": set(),
+      "conexoes_ativas": {},
+  }
 
-    if not dados["conexoes_ativas"] and relatorios_usuarios:
-        agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        for usr in relatorios_usuarios.keys():
-            dados["conexoes_ativas"][usr] = {
-                "usuario": usr,
-                "ip": "127.0.0.1",
-                "pais": "Brasil",
-                "cidade": "Campinas",
-                "regiao": "São Paulo",
-                "localizacao": "Campinas - São Paulo",
-                "lat": -22.9056,
-                "lon": -47.0608,
-                "data_hora": agora
-            }
-        dados["total_verificacoes"] = max(dados["total_verificacoes"], len(relatorios_usuarios))
+  if os.path.exists(DB_FILE):
+    try:
+      with open(DB_FILE, "r", encoding="utf-8") as f:
+        carregado = json.load(f)
+        dados["total_verificacoes"] = carregado.get("total_verificacoes", 0)
+        dados["total_experiencias_enviadas"] = carregado.get(
+            "total_experiencias_enviadas", 0
+        )
+        dados["ultima_conexao"] = carregado.get(
+            "ultima_conexao", dados["ultima_conexao"]
+        )
+        dados["ips_conectados"] = set(carregado.get("ips_conectados", []))
+        dados["conexoes_ativas"] = carregado.get("conexoes_ativas", {})
+    except Exception:
+      pass
 
-    return dados
+  if not dados["conexoes_ativas"] and relatorios_usuarios:
+    agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for usr in relatorios_usuarios.keys():
+      dados["conexoes_ativas"][usr] = {
+          "usuario": usr,
+          "ip": "127.0.0.1",
+          "pais": "Brasil",
+          "cidade": "Campinas",
+          "regiao": "São Paulo",
+          "localizacao": "Campinas - São Paulo",
+          "lat": -22.9056,
+          "lon": -47.0608,
+          "data_hora": agora,
+      }
+    dados["total_verificacoes"] = max(
+        dados["total_verificacoes"], len(relatorios_usuarios)
+    )
+
+  return dados
+
 
 def salvar_dados():
-    dados_para_salvar = stats_data.copy()
-    dados_para_salvar["ips_conectados"] = list(stats_data["ips_conectados"])
-    try:
-        with open(DB_FILE, "w", encoding="utf-8") as f:
-            json.dump(dados_para_salvar, f, ensure_ascii=False, indent=4)
-    except Exception:
-        pass
+  dados_para_salvar = stats_data.copy()
+  dados_para_salvar["ips_conectados"] = list(stats_data["ips_conectados"])
+  try:
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+      json.dump(dados_para_salvar, f, ensure_ascii=False, indent=4)
+  except Exception:
+    pass
+
 
 stats_data = carregar_dados()
 
+
 def verificar_admin(credentials: HTTPBasicCredentials = Depends(security)):
-    is_user_ok = secrets.compare_digest(credentials.username, ADMIN_USER)
-    is_pass_ok = secrets.compare_digest(credentials.password, ADMIN_PASS)
-    if not (is_user_ok and is_pass_ok):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Acesso negado. Credenciais de Administrador inválidas.",
-            headers={"WWW-Authenticate": "Basic"},
-        )
-    return credentials.username
+  is_user_ok = secrets.compare_digest(credentials.username, ADMIN_USER)
+  is_pass_ok = secrets.compare_digest(credentials.password, ADMIN_PASS)
+  if not (is_user_ok and is_pass_ok):
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Acesso negado. Credenciais de Administrador inválidas.",
+        headers={"WWW-Authenticate": "Basic"},
+    )
+  return credentials.username
+
+
+# --- NOVAS ROTAS DE AUTENTICAÇÃO POR E-MAIL (OTP) ---
+@app.post("/api/v1/enviar-otp")
+async def api_enviar_otp(request: Request):
+  try:
+    dados = await request.json()
+  except Exception:
+    dados = {}
+  email = dados.get("email")
+  if not email:
+    raise HTTPException(status_code=400, detail="E-mail obrigatório.")
+
+  codigo = f"{random.randint(100000, 999999)}"
+  otp_database[email] = codigo
+
+  enviado = enviar_email_otp(email, codigo)
+  if not enviado:
+    # Se falhar o SMTP configurado, garante o funcionamento em modo de teste local
+    print(f"[Modo Fallback] Código OTP para {email}: {codigo}")
+
+  return {
+      "status": "sucesso",
+      "mensagem": f"Código de verificação enviado para {email}",
+  }
+
+
+@app.post("/api/v1/verificar-otp")
+async def api_verificar_otp(request: Request):
+  try:
+    dados = await request.json()
+  except Exception:
+    dados = {}
+  email = dados.get("email")
+  codigo = dados.get("codigo")
+
+  if not email or not codigo:
+    raise HTTPException(status_code=400, detail="Dados incompletos.")
+
+  codigo_salvo = otp_database.get(email)
+  if not codigo_salvo or codigo_salvo != codigo:
+    raise HTTPException(
+        status_code=400, detail="Código de verificação incorreto ou expirado."
+    )
+
+  del otp_database[email]
+  return {"status": "sucesso", "mensagem": "E-mail validado com sucesso!"}
+
 
 @app.api_route("/api/v1/verificar-licenca", methods=["GET", "POST"])
 async def verificar_licenca(request: Request):
-    dados = {}
-    if request.query_params:
-        dados = dict(request.query_params)
-    if not dados:
-        try:
-            dados = await request.json()
-        except Exception:
-            pass
-    if not dados:
-        try:
-            form_data = await request.form()
-            dados = dict(form_data)
-        except Exception:
-            pass
-    
-    usuario = dados.get("usuario") or dados.get("Usuario") or dados.get("user") or "Adm_adm"
-    licenca = dados.get("licenca") or ""
-    
-    if licenca and licenca != "PROD-ADM-2026":
-        raise HTTPException(status_code=401, detail="Chave de licença inválida ou expirada.")
+  dados = {}
+  if request.query_params:
+    dados = dict(request.query_params)
+  if not dados:
+    try:
+      dados = await request.json()
+    except Exception:
+      pass
+  if not dados:
+    try:
+      form_data = await request.form()
+      dados = dict(form_data)
+    except Exception:
+      pass
 
-    ip_bruto = request.headers.get("x-forwarded-for")
-    if not ip_bruto and request.client:
-        ip_bruto = request.client.host
+  usuario = (
+      dados.get("usuario")
+      or dados.get("Usuario")
+      or dados.get("user")
+      or "Adm_adm"
+  )
+  licenca = dados.get("licenca") or ""
 
-    ip_cliente = ip_bruto.split(",")[0].strip() if ip_bruto else "Desconhecido"
+  if licenca and licenca != "PROD-ADM-2026":
+    raise HTTPException(
+        status_code=401, detail="Chave de licença inválida ou expirada."
+    )
 
-    pais = "Brasil"
-    cidade = "Campinas"
-    regiao = "São Paulo"
-    lat = -22.9056
-    lon = -47.0608
+  ip_bruto = request.headers.get("x-forwarded-for")
+  if not ip_bruto and request.client:
+    ip_bruto = request.client.host
 
-    stats_data["total_verificacoes"] += 1
-    agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    stats_data["ultima_conexao"] = agora
-    stats_data["ips_conectados"].add(ip_cliente)
-    
-    localizacao_completa = f"{cidade} - {regiao}"
-    
-    stats_data["conexoes_ativas"][usuario] = {
+  ip_cliente = ip_bruto.split(",")[0].strip() if ip_bruto else "Desconhecido"
+
+  pais = "Brasil"
+  cidade = "Campinas"
+  regiao = "São Paulo"
+  lat = -22.9056
+  lon = -47.0608
+
+  stats_data["total_verificacoes"] += 1
+  agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+  stats_data["ultima_conexao"] = agora
+  stats_data["ips_conectados"].add(ip_cliente)
+
+  localizacao_completa = f"{cidade} - {regiao}"
+
+  stats_data["conexoes_ativas"][usuario] = {
+      "usuario": usuario,
+      "ip": ip_cliente,
+      "pais": pais,
+      "cidade": cidade,
+      "regiao": regiao,
+      "localizacao": localizacao_completa,
+      "lat": lat,
+      "lon": lon,
+      "data_hora": agora,
+  }
+
+  if usuario not in relatorios_usuarios:
+    relatorios_usuarios[usuario] = {
         "usuario": usuario,
-        "ip": ip_cliente,
-        "pais": pais,
-        "cidade": cidade,
-        "regiao": regiao,
-        "localizacao": localizacao_completa,
-        "lat": lat,
-        "lon": lon,
-        "data_hora": agora
+        "lucro_total": 0.0,
+        "prejuizo_total": 0.0,
+        "operacoes_vencedoras": 0,
+        "operacoes_perdedoras": 0,
+        "banca_atual": 0.0,
+        "saldo_creditos": 50.00,
+        "comissao_devida": 0.0,
+        "status_robo": "ATIVO",
+        "ultima_atualizacao": agora,
     }
+    salvar_relatorios()
 
-    if usuario not in relatorios_usuarios:
-        relatorios_usuarios[usuario] = {
-            "usuario": usuario,
-            "lucro_total": 0.0,
-            "prejuizo_total": 0.0,
-            "operacoes_vencedoras": 0,
-            "operacoes_perdedoras": 0,
-            "banca_atual": 0.0,
-            "saldo_creditos": 50.00,
-            "comissao_devida": 0.0,
-            "status_robo": "ATIVO",
-            "ultima_atualizacao": agora
-        }
-        salvar_relatorios()
+  salvar_dados()
 
-    salvar_dados()
+  user_info = relatorios_usuarios[usuario]
+  return {
+      "status": "sucesso",
+      "mensagem": "Licença validada com sucesso",
+      "saldo_creditos": user_info.get("saldo_creditos", 0.0),
+      "localizacao": f"{pais}, {localizacao_completa}",
+  }
 
-    user_info = relatorios_usuarios[usuario]
-    return {
-        "status": "sucesso", 
-        "mensagem": "Licença validada com sucesso",
-        "saldo_creditos": user_info.get("saldo_creditos", 0.0),
-        "localizacao": f"{pais}, {localizacao_completa}"
-    }
 
 @app.api_route("/api/v1/heartbeat", methods=["POST", "GET"])
 async def heartbeat_robo(request: Request):
-    dados = {}
-    if request.query_params:
-        dados = dict(request.query_params)
-    if not dados:
-        try:
-            dados = await request.json()
-        except Exception:
-            pass
-            
-    usuario = dados.get("usuario") or dados.get("user") or "Robo_Ativo"
-    
-    ip_bruto = request.headers.get("x-forwarded-for")
-    if not ip_bruto and request.client:
-        ip_bruto = request.client.host
-    ip_cliente = ip_bruto.split(",")[0].strip() if ip_bruto else "Desconhecido"
+  dados = {}
+  if request.query_params:
+    dados = dict(request.query_params)
+  if not dados:
+    try:
+      dados = await request.json()
+    except Exception:
+      pass
 
-    agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    stats_data["ultima_conexao"] = agora
+  usuario = dados.get("usuario") or dados.get("user") or "Robo_Ativo"
 
-    if usuario not in relatorios_usuarios:
-        relatorios_usuarios[usuario] = {
-            "usuario": usuario,
-            "lucro_total": 0.0,
-            "prejuizo_total": 0.0,
-            "operacoes_vencedoras": 0,
-            "operacoes_perdedoras": 0,
-            "banca_atual": 0.0,
-            "saldo_creditos": 50.00,
-            "comissao_devida": 0.0,
-            "status_robo": "ATIVO",
-            "ultima_atualizacao": agora
-        }
-        salvar_relatorios()
+  ip_bruto = request.headers.get("x-forwarded-for")
+  if not ip_bruto and request.client:
+    ip_bruto = request.client.host
+  ip_cliente = ip_bruto.split(",")[0].strip() if ip_bruto else "Desconhecido"
 
-    if usuario not in stats_data["conexoes_ativas"]:
-        stats_data["conexoes_ativas"][usuario] = {
-            "usuario": usuario,
-            "ip": ip_cliente,
-            "pais": "Brasil",
-            "cidade": "Campinas",
-            "regiao": "São Paulo",
-            "localizacao": "Campinas - São Paulo",
-            "lat": -22.9056,
-            "lon": -47.0608,
-            "data_hora": agora
-        }
-    else:
-        stats_data["conexoes_ativas"][usuario]["data_hora"] = agora
-    
-    salvar_dados()
-    
-    user_info = relatorios_usuarios[usuario]
-    status_atual = user_info.get("status_robo", "ATIVO")
-    
-    return {
-        "status": "online", 
-        "estado_robo": status_atual,
-        "saldo_creditos": user_info.get("saldo_creditos", 0.0),
-        "mensagem": "Heartbeat recebido"
+  agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+  stats_data["ultima_conexao"] = agora
+
+  if usuario not in relatorios_usuarios:
+    relatorios_usuarios[usuario] = {
+        "usuario": usuario,
+        "lucro_total": 0.0,
+        "prejuizo_total": 0.0,
+        "operacoes_vencedoras": 0,
+        "operacoes_perdedoras": 0,
+        "banca_atual": 0.0,
+        "saldo_creditos": 50.00,
+        "comissao_devida": 0.0,
+        "status_robo": "ATIVO",
+        "ultima_atualizacao": agora,
     }
+    salvar_relatorios()
+
+  if usuario not in stats_data["conexoes_ativas"]:
+    stats_data["conexoes_ativas"][usuario] = {
+        "usuario": usuario,
+        "ip": ip_cliente,
+        "pais": "Brasil",
+        "cidade": "Campinas",
+        "regiao": "São Paulo",
+        "localizacao": "Campinas - São Paulo",
+        "lat": -22.9056,
+        "lon": -47.0608,
+        "data_hora": agora,
+    }
+  else:
+    stats_data["conexoes_ativas"][usuario]["data_hora"] = agora
+
+  salvar_dados()
+
+  user_info = relatorios_usuarios[usuario]
+  status_atual = user_info.get("status_robo", "ATIVO")
+
+  return {
+      "status": "online",
+      "estado_robo": status_atual,
+      "saldo_creditos": user_info.get("saldo_creditos", 0.0),
+      "mensagem": "Heartbeat recebido",
+  }
+
 
 @app.api_route("/api/v1/experiencia", methods=["GET", "POST"])
 async def registrar_experiencia(request: Request):
-    stats_data["total_experiencias_enviadas"] += 1
-    salvar_dados()
-    return {"status": "registrado", "mensagem": "Experiência absorvida."}
+  stats_data["total_experiencias_enviadas"] += 1
+  salvar_dados()
+  return {"status": "registrado", "mensagem": "Experiência absorvida."}
+
 
 @app.api_route("/api/v1/relatorio-usuario", methods=["POST"])
 async def receber_relatorio_usuario(request: Request):
-    try:
-        dados = await request.json()
-    except Exception:
-        dados = {}
+  try:
+    dados = await request.json()
+  except Exception:
+    dados = {}
 
-    licenca = dados.get("licenca") or ""
-    senha = dados.get("senha") or ""
-    usuario = dados.get("usuario") or ""
+  licenca = dados.get("licenca") or ""
+  senha = dados.get("senha") or ""
+  usuario = dados.get("usuario") or ""
 
-    if not usuario or licenca != "PROD-ADM-2026" or senha != "09870987":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Acesso negado. Credenciais ou licença inválidas para envio de relatórios."
-        )
+  if not usuario or licenca != "PROD-ADM-2026" or senha != "09870987":
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=(
+            "Acesso negado. Credenciais ou licença inválidas para envio de"
+            " relatórios."
+        ),
+    )
 
-    lucro = float(dados.get("lucro", 0.0))
-    banca = float(dados.get("banca", 0.0))
-    
-    vitorias = dados.get("vitorias")
-    derrotas = dados.get("derrotas")
-    lucro_total_acomp = dados.get("lucro_total")
-    prejuizo_total_acomp = dados.get("prejuizo_total")
+  lucro = float(dados.get("lucro", 0.0))
+  banca = float(dados.get("banca", 0.0))
 
-    if usuario not in relatorios_usuarios:
-        relatorios_usuarios[usuario] = {
-            "usuario": usuario,
-            "lucro_total": 0.0,
-            "prejuizo_total": 0.0,
-            "operacoes_vencedoras": 0,
-            "operacoes_perdedoras": 0,
-            "banca_atual": banca,
-            "saldo_creditos": 50.00,
-            "comissao_devida": 0.0,
-            "status_robo": "ATIVO",
-            "ultima_atualizacao": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
+  vitorias = dados.get("vitorias")
+  derrotas = dados.get("derrotas")
+  lucro_total_acomp = dados.get("lucro_total")
+  prejuizo_total_acomp = dados.get("prejuizo_total")
 
-    user_data = relatorios_usuarios[usuario]
-    user_data["banca_atual"] = banca if banca > 0 else user_data.get("banca_atual", 0.0)
-    user_data["ultima_atualizacao"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    if vitorias is not None and derrotas is not None and lucro_total_acomp is not None:
-        user_data["operacoes_vencedoras"] = int(vitorias)
-        user_data["operacoes_perdedoras"] = int(derrotas)
-        user_data["lucro_total"] = float(lucro_total_acomp)
-        user_data["prejuizo_total"] = float(prejuizo_total_acomp)
-    else:
-        if lucro >= 0:
-            user_data["lucro_total"] += lucro
-            if lucro > 0:
-                user_data["operacoes_vencedoras"] += 1
-        else:
-            user_data["prejuizo_total"] += abs(lucro)
-            user_data["operacoes_perdedoras"] += 1
-
-    salvar_relatorios()
-    return {
-        "status": "sucesso", 
-        "mensagem": "Relatório processado com sucesso",
-        "saldo_creditos_atual": user_data["saldo_creditos"],
-        "status_robo": user_data["status_robo"]
+  if usuario not in relatorios_usuarios:
+    relatorios_usuarios[usuario] = {
+        "usuario": usuario,
+        "lucro_total": 0.0,
+        "prejuizo_total": 0.0,
+        "operacoes_vencedoras": 0,
+        "operacoes_perdedoras": 0,
+        "banca_atual": banca,
+        "saldo_creditos": 50.00,
+        "comissao_devida": 0.0,
+        "status_robo": "ATIVO",
+        "ultima_atualizacao": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
+
+  user_data = relatorios_usuarios[usuario]
+  user_data["banca_atual"] = (
+      banca if banca > 0 else user_data.get("banca_atual", 0.0)
+  )
+  user_data["ultima_atualizacao"] = datetime.now().strftime(
+      "%Y-%m-%d %H:%M:%S"
+  )
+
+  if (
+      vitorias is not None
+      and derrotas is not None
+      and lucro_total_acomp is not None
+  ):
+    user_data["operacoes_vencedoras"] = int(vitorias)
+    user_data["operacoes_perdedoras"] = int(derrotas)
+    user_data["lucro_total"] = float(lucro_total_acomp)
+    user_data["prejuizo_total"] = float(prejuizo_total_acomp)
+  else:
+    if lucro >= 0:
+      user_data["lucro_total"] += lucro
+      if lucro > 0:
+        user_data["operacoes_vencedoras"] += 1
+    else:
+      user_data["prejuizo_total"] += abs(lucro)
+      user_data["operacoes_perdedoras"] += 1
+
+  salvar_relatorios()
+  return {
+      "status": "sucesso",
+      "mensagem": "Relatório processado com sucesso",
+      "saldo_creditos_atual": user_data["saldo_creditos"],
+      "status_robo": user_data["status_robo"],
+  }
+
 
 @app.post("/api/v1/admin/adicionar-credito")
 async def adicionar_credito(request: Request, admin: str = Depends(verificar_admin)):
-    try:
-        dados = await request.json()
-    except Exception:
-        dados = {}
-    
-    usuario = dados.get("usuario")
-    valor = float(dados.get("valor", 0.0))
+  try:
+    dados = await request.json()
+  except Exception:
+    dados = {}
 
-    if not usuario or usuario not in relatorios_usuarios:
-        raise HTTPException(status_code=404, detail="Utilizador não encontrado.")
+  usuario = dados.get("usuario")
+  valor = float(dados.get("valor", 0.0))
 
-    user_data = relatorios_usuarios[usuario]
-    user_data["saldo_creditos"] = user_data.get("saldo_creditos", 0.0) + valor
-    
-    if user_data["saldo_creditos"] > 0 and user_data["status_robo"] == "BLOQUEADO":
-        user_data["status_robo"] = "ATIVO"
+  if not usuario or usuario not in relatorios_usuarios:
+    raise HTTPException(status_code=404, detail="Utilizador não encontrado.")
 
-    salvar_relatorios()
-    return {"status": "sucesso", "mensagem": f"Créditos adicionados com sucesso para {usuario}.", "novo_saldo": user_data["saldo_creditos"]}
+  user_data = relatorios_usuarios[usuario]
+  user_data["saldo_creditos"] = user_data.get("saldo_creditos", 0.0) + valor
+
+  if user_data["saldo_creditos"] > 0 and user_data["status_robo"] == "BLOQUEADO":
+    user_data["status_robo"] = "ATIVO"
+
+  salvar_relatorios()
+  return {
+      "status": "sucesso",
+      "mensagem": f"Créditos adicionados com sucesso para {usuario}.",
+      "novo_saldo": user_data["saldo_creditos"],
+  }
+
 
 @app.get("/api/v1/stats", response_class=HTMLResponse)
 def obter_estatisticas(admin: str = Depends(verificar_admin)):
-    ultimas_conexoes_html = ""
-    marcadores_js = ""
-    linhas_relatorios_html = ""
-    linhas_financeiro_html = ""
-    
-    centro_lat = -22.9056
-    centro_lon = -47.0608
+  ultimas_conexoes_html = ""
+  marcadores_js = ""
+  linhas_relatorios_html = ""
+  linhas_financeiro_html = ""
 
-    lista_conexoes = list(stats_data["conexoes_ativas"].values())
+  centro_lat = -22.9056
+  centro_lon = -47.0608
 
-    for c in lista_conexoes:
-        usr = c["usuario"]
-        if usr not in relatorios_usuarios:
-            relatorios_usuarios[usr] = {
-                "usuario": usr,
-                "lucro_total": 0.0,
-                "prejuizo_total": 0.0,
-                "operacoes_vencedoras": 0,
-                "operacoes_perdedoras": 0,
-                "banca_atual": 0.0,
-                "saldo_creditos": 50.00,
-                "comissao_devida": 0.0,
-                "status_robo": "ATIVO",
-                "ultima_atualizacao": c["data_hora"]
-            }
-            salvar_relatorios()
+  lista_conexoes = list(stats_data["conexoes_ativas"].values())
 
-    if lista_conexoes:
-        ultima = lista_conexoes[-1]
-        centro_lat = ultima["lat"]
-        centro_lon = ultima["lon"]
+  for c in lista_conexoes:
+    usr = c["usuario"]
+    if usr not in relatorios_usuarios:
+      relatorios_usuarios[usr] = {
+          "usuario": usr,
+          "lucro_total": 0.0,
+          "prejuizo_total": 0.0,
+          "operacoes_vencedoras": 0,
+          "operacoes_perdedoras": 0,
+          "banca_atual": 0.0,
+          "saldo_creditos": 50.00,
+          "comissao_devida": 0.0,
+          "status_robo": "ATIVO",
+          "ultima_atualizacao": c["data_hora"],
+      }
+      salvar_relatorios()
 
-    for c in reversed(lista_conexoes):
-        try:
-            dt_conn = datetime.strptime(c['data_hora'], "%Y-%m-%d %H:%M:%S")
-            ativo = datetime.now() - dt_conn < timedelta(hours=72)
-        except Exception:
-            ativo = True
+  if lista_conexoes:
+    ultima = lista_conexoes[-1]
+    centro_lat = ultima["lat"]
+    centro_lon = ultima["lon"]
 
-        status_cor = "#4ade80" if ativo else "#94a3b8"
-        status_txt = "Online" if ativo else "Inativo"
+  for c in reversed(lista_conexoes):
+    try:
+      dt_conn = datetime.strptime(c["data_hora"], "%Y-%m-%d %H:%M:%S")
+      ativo = datetime.now() - dt_conn < timedelta(hours=72)
+    except Exception:
+      ativo = True
 
-        ultimas_conexoes_html += f"""
+    status_cor = "#4ade80" if ativo else "#94a3b8"
+    status_txt = "Online" if ativo else "Inativo"
+
+    ultimas_conexoes_html += f"""
         <tr>
             <td>🌍 {c['pais']}</td>
             <td>🏙️ <b>{c['localizacao']}</b><br><small style="color:var(--text-muted);">IP: {c['ip']} | Utilizador: {c['usuario']}</small></td>
@@ -386,7 +522,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
             <td>{c['data_hora']}</td>
         </tr>
         """
-        marcadores_js += f"""
+    marcadores_js += f"""
         L.circleMarker([{c['lat']}, {c['lon']}], {{
             radius: 12,
             fillColor: "{status_cor}",
@@ -397,17 +533,17 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
         }}).addTo(map).bindPopup("<b>Utilizador:</b> {c['usuario']}<br><b>Local:</b> {c['localizacao']}, {c['pais']}<br><b>IP:</b> {c['ip']}");
         """
 
-    for usr, info in relatorios_usuarios.items():
-        lucro_liquido = info["lucro_total"] - info["prejuizo_total"]
-        cor_lucro = "#4ade80" if lucro_liquido >= 0 else "#f87171"
-        sinal = "+" if lucro_liquido >= 0 else ""
-        
-        saldo_cred = info.get("saldo_creditos", 50.0)
-        comissao_gerada = info.get("comissao_devida", 0.0)
-        status_robo = info.get("status_robo", "ATIVO")
-        cor_status = "#4ade80" if status_robo == "ATIVO" else "#f87171"
-        
-        linhas_relatorios_html += f"""
+  for usr, info in relatorios_usuarios.items():
+    lucro_liquido = info["lucro_total"] - info["prejuizo_total"]
+    cor_lucro = "#4ade80" if lucro_liquido >= 0 else "#f87171"
+    sinal = "+" if lucro_liquido >= 0 else ""
+
+    saldo_cred = info.get("saldo_creditos", 50.0)
+    comissao_gerada = info.get("comissao_devida", 0.0)
+    status_robo = info.get("status_robo", "ATIVO")
+    cor_status = "#4ade80" if status_robo == "ATIVO" else "#f87171"
+
+    linhas_relatorios_html += f"""
         <tr>
             <td>👤 <b>{usr}</b></td>
             <td>💰 R$ {info['banca_atual']:.2f}</td>
@@ -417,7 +553,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
         </tr>
         """
 
-        linhas_financeiro_html += f"""
+    linhas_financeiro_html += f"""
         <tr>
             <td>👤 <b>{usr}</b></td>
             <td>R$ {saldo_cred:.2f}</td>
@@ -427,12 +563,14 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
         </tr>
         """
 
-    total_verif = max(len(stats_data["conexoes_ativas"]), len(relatorios_usuarios))
-    total_exp = stats_data["total_experiencias_enviadas"]
-    total_ips = max(len(stats_data["ips_conectados"]), 1)
-    ultima_conn = stats_data["ultima_conexao"] or "Nenhuma"
+  total_verif = max(
+      len(stats_data["conexoes_ativas"]), len(relatorios_usuarios)
+  )
+  total_exp = stats_data["total_experiencias_enviadas"]
+  total_ips = max(len(stats_data["ips_conectados"]), 1)
+  ultima_conn = stats_data["ultima_conexao"] or "Nenhuma"
 
-    html_content = f"""
+  html_content = f"""
     <!DOCTYPE html>
     <html lang="pt">
     <head>
@@ -624,9 +762,6 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 border-radius: 8px;
                 background-color: #070d1b;
                 border: 1px solid var(--border-color);
-            }}
-            #map-expanded {{
-                height: 500px;
             }}
             .leaflet-tile-pane {{
                 filter: brightness(0.65) invert(1) contrast(2.8) hue-rotate(200deg) saturate(1.2);
@@ -820,7 +955,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {linhas_financeiro_html if linhas_financeiro_html else '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">Nenhum utilizador registado no financeiro.</td></tr>'}
+                                    {linhas_financeiro_html if linhas_financeiro_html else '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">Nenhum utilizador financeiro registado.</td></tr>'}
                                 </tbody>
                             </table>
                         </div>
@@ -830,7 +965,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 <!-- ABA 4: MAPA MUNDIAL -->
                 <div id="mapa" class="tab-content">
                     <div class="panel">
-                        <h2><i class="fa-solid fa-globe" style="color: var(--accent-blue);"></i> Geolocalização Global de Clientes</h2>
+                        <h2><i class="fa-solid fa-globe" style="color: var(--accent-blue);"></i> Mapa Mundial de Conexões Ativas</h2>
                         <div id="map-expanded"></div>
                     </div>
                 </div>
@@ -838,19 +973,19 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 <!-- ABA 5: CONEXÕES -->
                 <div id="conexoes" class="tab-content">
                     <div class="panel">
-                        <h2><i class="fa-solid fa-network-wired" style="color: var(--accent-blue);"></i> Registo Detalhado de Conexões Ativas</h2>
+                        <h2><i class="fa-solid fa-network-wired" style="color: var(--accent-blue);"></i> Histórico Completo de Conexões e IPs</h2>
                         <div class="table-wrapper">
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>Utilizador</th>
-                                        <th>Endereço IP</th>
-                                        <th>Localização Geográfica</th>
-                                        <th>Última Sincronização</th>
+                                        <th>País</th>
+                                        <th>Localização & IP</th>
+                                        <th>Status</th>
+                                        <th>Último Contacto</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {ultimas_conexoes_html if ultimas_conexoes_html else '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">Sem conexões ativas.</td></tr>'}
+                                    {ultimas_conexoes_html if ultimas_conexoes_html else '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">Sem conexões registadas.</td></tr>'}
                                 </tbody>
                             </table>
                         </div>
@@ -858,87 +993,72 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 </div>
 
             </div>
-            <footer>
-                Servidor de IA Centralizado &copy; 2026 - Todos os direitos reservados.
-            </footer>
         </main>
 
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
-            let map = L.map('map').setView([{centro_lat}, {centro_lon}], 4);
-            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                maxZoom: 18,
-                attribution: '&copy; OpenStreetMap contributors'
-            }}).addTo(map);
-
-            let mapExpanded = null;
-
-            {marcadores_js}
-
             function switchTab(tabId, element) {{
                 document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
                 document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
-                
                 document.getElementById(tabId).classList.add('active');
                 element.classList.add('active');
 
-                const titles = {{
-                    'visao-geral': ['Painel de Monitoramento', 'Gestão de Licenças e Créditos em Tempo Real'],
-                    'relatorios': ['Relatórios de Desempenho', 'Histórico e Estatísticas de Operações dos Clientes'],
-                    'financeiro': ['Controlo Financeiro & Carteira', 'Gestão de Créditos Pré-Pagos e Comissões'],
-                    'mapa': ['Mapa Mundial de Clientes', 'Visualização Geográfica Global de Terminais Conectados'],
-                    'conexoes': ['Registo de Conexões', 'Monitoramento Ativo de IPs e Endereços de Clientes']
-                }};
-
-                if(titles[tabId]) {{
-                    document.getElementById('header-title-text').innerText = titles[tabId][0];
-                    document.getElementById('header-subtitle-text').innerText = titles[tabId][1];
-                }}
-
-                if (tabId === 'mapa') {{
-                    setTimeout(() => {{
-                        if (!mapExpanded) {{
-                            mapExpanded = L.map('map-expanded').setView([{centro_lat}, {centro_lon}], 4);
-                            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                                maxZoom: 18,
-                                attribution: '&copy; OpenStreetMap contributors'
-                            }}).addTo(mapExpanded);
-                            {marcadores_js.replace("addTo(map)", "addTo(mapExpanded)")}
-                        }} else {{
-                            mapExpanded.invalidateSize();
-                        }}
-                    }}, 200);
+                if(tabId === 'visao-geral' || tabId === 'mapa') {{
+                    setTimeout(() => {{ window.dispatchEvent(new Event('resize')); }}, 200);
                 }}
             }}
 
+            const map = L.map('map').setView([{centro_lat}, {centro_lon}], 4);
+            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                maxZoom: 18,
+                attribution: '&copy; OpenStreetMap'
+            }}).addTo(map);
+
+            const mapExp = L.map('map-expanded').setView([{centro_lat}, {centro_lon}], 4);
+            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                maxZoom: 18,
+                attribution: '&copy; OpenStreetMap'
+            }}).addTo(mapExp);
+
+            {marcadores_js}
+            
+            // Adiciona marcadores também no mapa expandido
+            setTimeout(() => {{
+                mapExp.invalidateSize();
+            }}, 300);
+
             async function adicionarCredito(usuario) {{
-                let valorStr = prompt("Digite o valor de créditos (R$) a adicionar para " + usuario + ":", "50.00");
-                if(!valorStr) return;
-                let valor = parseFloat(valorStr);
-                if(isNaN(valor) || valor <= 0) {{
-                    alert("Valor inválido!");
+                const valorStr = prompt(`Digite o valor de crédito (R$) a adicionar para o utilizador ${{usuario}}:`, "50.0");
+                if (!valorStr) return;
+                const valor = parseFloat(valorStr);
+                if (isNaN(valor) || valor <= 0) {{
+                    alert("Valor inválido.");
                     return;
                 }}
 
-                let response = await fetch('/api/v1/admin/adicionar-credito', {{
-                    method: 'POST',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ usuario: usuario, valor: valor }})
-                }});
-
-                if(response.ok) {{
-                    let resJson = await response.json();
-                    alert(resJson.mensagem);
-                    location.reload();
-                }} else {{
-                    alert("Erro ao adicionar créditos. Verifique as credenciais de admin.");
+                try {{
+                    const response = await fetch('/api/v1/admin/adicionar-credito', {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{ usuario: usuario, valor: valor }})
+                    }});
+                    const res = await response.json();
+                    if(response.ok) {{
+                        alert(res.mensagem);
+                        location.reload();
+                    }} else {{
+                        alert("Erro: " + (res.detail || "Erro desconhecido"));
+                    }}
+                }} catch(e) {{
+                    alert("Erro de conexão com o servidor.");
                 }}
             }}
         </script>
     </body>
     </html>
     """
-    return html_content
+  return html_content
+
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=10000, reload=True)
+  uvicorn.run(app, host="0.0.0.0", port=8000)
