@@ -8,7 +8,7 @@ secrets = __import__('secrets')
 smtplib = __import__('smtplib')
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 import uvicorn
 
@@ -161,7 +161,17 @@ def verificar_admin(credentials: HTTPBasicCredentials = Depends(security)):
   return credentials.username
 
 
-# --- NOVAS ROTAS DE AUTENTICAÇÃO POR E-MAIL (OTP) ---
+# --- ROTA RAIZ (Evita o erro 404 no Render) ---
+@app.get("/", include_in_schema=False)
+def raiz():
+  return {
+      "status": "online",
+      "servidor": "Quantum MT5 Backend",
+      "mensagem": "Servidor operando com sucesso. Acesse o painel em /api/v1/stats",
+  }
+
+
+# --- ROTAS DE AUTENTICAÇÃO POR E-MAIL (OTP) ---
 @app.post("/api/v1/enviar-otp")
 async def api_enviar_otp(request: Request):
   try:
@@ -177,7 +187,6 @@ async def api_enviar_otp(request: Request):
 
   enviado = enviar_email_otp(email, codigo)
   if not enviado:
-    # Se falhar o SMTP configurado, garante o funcionamento em modo de teste local
     print(f"[Modo Fallback] Código OTP para {email}: {codigo}")
 
   return {
@@ -1022,7 +1031,6 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
 
             {marcadores_js}
             
-            // Adiciona marcadores também no mapa expandido
             setTimeout(() => {{
                 mapExp.invalidateSize();
             }}, 300);
@@ -1061,4 +1069,5 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
 
 
 if __name__ == "__main__":
-  uvicorn.run(app, host="0.0.0.0", port=8000)
+  port = int(os.environ.get("PORT", 8000))
+  uvicorn.run(app, host="0.0.0.0", port=port)
