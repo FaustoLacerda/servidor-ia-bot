@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 import uvicorn
 
-app = FastAPI(title="Quantum MT5 - Servidor & Licenciamento")
+app = FastAPI(title="Quantum MT5 - Servidor & Licenciamento Completo")
 
 security = HTTPBasic()
 
@@ -28,7 +28,7 @@ SMTP_PORT = 587
 SMTP_EMAIL = "seu-email@gmail.com"  # Substitua pelo seu e-mail
 SMTP_PASSWORD = "xxxx xxxx xxxx xxxx"  # Senha de App do Gmail
 
-# Dicionário temporário para armazenar os códigos OTP gerados
+# Dicionário temporário para armazenar códigos OTP
 otp_database = {}
 
 
@@ -161,7 +161,6 @@ def verificar_admin(credentials: HTTPBasicCredentials = Depends(security)):
   return credentials.username
 
 
-# --- ROTA RAIZ (Evita o erro 404 no Render) ---
 @app.get("/", include_in_schema=False)
 def raiz():
   return {
@@ -171,7 +170,6 @@ def raiz():
   }
 
 
-# --- ROTAS DE AUTENTICAÇÃO POR E-MAIL (OTP) ---
 @app.post("/api/v1/enviar-otp")
 async def api_enviar_otp(request: Request):
   try:
@@ -217,6 +215,25 @@ async def api_verificar_otp(request: Request):
   return {"status": "sucesso", "mensagem": "E-mail validado com sucesso!"}
 
 
+@app.post("/api/v1/webhook/pagamento")
+async def webhook_pagamento(request: Request):
+  try:
+    dados = await request.json()
+  except Exception:
+    dados = {}
+
+  status_pagamento = dados.get("status") or dados.get("event")
+  email_cliente = dados.get("email") or dados.get("payer", {}).get("email")
+
+  if status_pagamento in ["approved", "confirmed", "PAYMENT_RECEIVED"]:
+    if email_cliente and email_cliente in relatorios_usuarios:
+      relatorios_usuarios[email_cliente]["status_robo"] = "ATIVO"
+      relatorios_usuarios[email_cliente]["saldo_creditos"] += 100.00
+      salvar_relatorios()
+
+  return {"status": "recebido"}
+
+
 @app.api_route("/api/v1/verificar-licenca", methods=["GET", "POST"])
 async def verificar_licenca(request: Request):
   dados = {}
@@ -247,37 +264,6 @@ async def verificar_licenca(request: Request):
         status_code=401, detail="Chave de licença inválida ou expirada."
     )
 
-  ip_bruto = request.headers.get("x-forwarded-for")
-  if not ip_bruto and request.client:
-    ip_bruto = request.client.host
-
-  ip_cliente = ip_bruto.split(",")[0].strip() if ip_bruto else "Desconhecido"
-
-  pais = "Brasil"
-  cidade = "Campinas"
-  regiao = "São Paulo"
-  lat = -22.9056
-  lon = -47.0608
-
-  stats_data["total_verificacoes"] += 1
-  agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-  stats_data["ultima_conexao"] = agora
-  stats_data["ips_conectados"].add(ip_cliente)
-
-  localizacao_completa = f"{cidade} - {regiao}"
-
-  stats_data["conexoes_ativas"][usuario] = {
-      "usuario": usuario,
-      "ip": ip_cliente,
-      "pais": pais,
-      "cidade": cidade,
-      "regiao": regiao,
-      "localizacao": localizacao_completa,
-      "lat": lat,
-      "lon": lon,
-      "data_hora": agora,
-  }
-
   if usuario not in relatorios_usuarios:
     relatorios_usuarios[usuario] = {
         "usuario": usuario,
@@ -289,18 +275,51 @@ async def verificar_licenca(request: Request):
         "saldo_creditos": 50.00,
         "comissao_devida": 0.0,
         "status_robo": "ATIVO",
-        "ultima_atualizacao": agora,
+        "ultima_atualizacao": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
     salvar_relatorios()
 
+  user_info = relatorios_usuarios[usuario]
+
+  if user_info.get("saldo_creditos", 0.0) < 0:
+    user_info["status_robo"] = "BLOQUEADO"
+    salvar_relatorios()
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            "Robô bloqueado por saldo insuficiente ou inadimplência."
+            " Contacte o suporte."
+        ),
+    )
+
+  ip_bruto = request.headers.get("x-forwarded-for")
+  if not ip_bruto and request.client:
+    ip_bruto = request.client.host
+  ip_cliente = ip_bruto.split(",")[0].strip() if ip_bruto else "Desconhecido"
+
+  agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+  stats_data["total_verificacoes"] += 1
+  stats_data["ultima_conexao"] = agora
+  stats_data["ips_conectados"].add(ip_cliente)
+
+  stats_data["conexoes_ativas"][usuario] = {
+      "usuario": usuario,
+      "ip": ip_cliente,
+      "pais": "Brasil",
+      "cidade": "Campinas",
+      "regiao": "São Paulo",
+      "localizacao": "Campinas - São Paulo",
+      "lat": -22.9056,
+      "lon": -47.0608,
+      "data_hora": agora,
+  }
   salvar_dados()
 
-  user_info = relatorios_usuarios[usuario]
   return {
       "status": "sucesso",
-      "mensagem": "Licença validada com sucesso",
+      "estado_robo": user_info.get("status_robo", "ATIVO"),
       "saldo_creditos": user_info.get("saldo_creditos", 0.0),
-      "localizacao": f"{pais}, {localizacao_completa}",
+      "mensagem": "Licença validada com sucesso",
   }
 
 
@@ -317,14 +336,6 @@ async def heartbeat_robo(request: Request):
 
   usuario = dados.get("usuario") or dados.get("user") or "Robo_Ativo"
 
-  ip_bruto = request.headers.get("x-forwarded-for")
-  if not ip_bruto and request.client:
-    ip_bruto = request.client.host
-  ip_cliente = ip_bruto.split(",")[0].strip() if ip_bruto else "Desconhecido"
-
-  agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-  stats_data["ultima_conexao"] = agora
-
   if usuario not in relatorios_usuarios:
     relatorios_usuarios[usuario] = {
         "usuario": usuario,
@@ -336,29 +347,17 @@ async def heartbeat_robo(request: Request):
         "saldo_creditos": 50.00,
         "comissao_devida": 0.0,
         "status_robo": "ATIVO",
-        "ultima_atualizacao": agora,
+        "ultima_atualizacao": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
     salvar_relatorios()
 
-  if usuario not in stats_data["conexoes_ativas"]:
-    stats_data["conexoes_ativas"][usuario] = {
-        "usuario": usuario,
-        "ip": ip_cliente,
-        "pais": "Brasil",
-        "cidade": "Campinas",
-        "regiao": "São Paulo",
-        "localizacao": "Campinas - São Paulo",
-        "lat": -22.9056,
-        "lon": -47.0608,
-        "data_hora": agora,
-    }
-  else:
-    stats_data["conexoes_ativas"][usuario]["data_hora"] = agora
-
-  salvar_dados()
-
   user_info = relatorios_usuarios[usuario]
   status_atual = user_info.get("status_robo", "ATIVO")
+
+  if user_info.get("saldo_creditos", 0.0) < 0:
+    status_atual = "BLOQUEADO"
+    user_info["status_robo"] = "BLOQUEADO"
+    salvar_relatorios()
 
   return {
       "status": "online",
@@ -389,10 +388,7 @@ async def receber_relatorio_usuario(request: Request):
   if not usuario or licenca != "PROD-ADM-2026" or senha != "09870987":
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail=(
-            "Acesso negado. Credenciais ou licença inválidas para envio de"
-            " relatórios."
-        ),
+        detail="Acesso negado. Credenciais ou licença inválidas.",
     )
 
   lucro = float(dados.get("lucro", 0.0))
@@ -443,6 +439,10 @@ async def receber_relatorio_usuario(request: Request):
       user_data["prejuizo_total"] += abs(lucro)
       user_data["operacoes_perdedoras"] += 1
 
+  lucro_liq_atual = user_data["lucro_total"] - user_data["prejuizo_total"]
+  if lucro_liq_atual > 0:
+    user_data["comissao_devida"] = lucro_liq_atual * 0.05
+
   salvar_relatorios()
   return {
       "status": "sucesso",
@@ -468,7 +468,7 @@ async def adicionar_credito(request: Request, admin: str = Depends(verificar_adm
   user_data = relatorios_usuarios[usuario]
   user_data["saldo_creditos"] = user_data.get("saldo_creditos", 0.0) + valor
 
-  if user_data["saldo_creditos"] > 0 and user_data["status_robo"] == "BLOQUEADO":
+  if user_data["saldo_creditos"] >= 0 and user_data["status_robo"] == "BLOQUEADO":
     user_data["status_robo"] = "ATIVO"
 
   salvar_relatorios()
@@ -542,10 +542,16 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
         }}).addTo(map).bindPopup("<b>Utilizador:</b> {c['usuario']}<br><b>Local:</b> {c['localizacao']}, {c['pais']}<br><b>IP:</b> {c['ip']}");
         """
 
+  nomes_utilizadores_js = []
+  lucros_utilizadores_js = []
+
   for usr, info in relatorios_usuarios.items():
     lucro_liquido = info["lucro_total"] - info["prejuizo_total"]
     cor_lucro = "#4ade80" if lucro_liquido >= 0 else "#f87171"
     sinal = "+" if lucro_liquido >= 0 else ""
+
+    nomes_utilizadores_js.append(usr)
+    lucros_utilizadores_js.append(round(lucro_liquido, 2))
 
     saldo_cred = info.get("saldo_creditos", 50.0)
     comissao_gerada = info.get("comissao_devida", 0.0)
@@ -585,9 +591,10 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Servidor IA - Painel de Monitoramento</title>
+        <title>Quantum MT5 - Painel Avançado Admin</title>
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
         <style>
             :root {{
                 --bg-main: #070d1b;
@@ -690,14 +697,6 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 gap: 8px;
                 border: 1px solid rgba(74, 222, 128, 0.2);
             }}
-            .badge-online::before {{
-                content: '';
-                width: 8px;
-                height: 8px;
-                background-color: var(--accent-green);
-                border-radius: 50%;
-                box-shadow: 0 0 8px var(--accent-green);
-            }}
             .content {{
                 padding: 25px 30px;
                 display: flex;
@@ -723,26 +722,17 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 border-radius: 12px;
                 padding: 20px;
                 position: relative;
-                overflow: hidden;
             }}
             .stat-card h3 {{
                 margin: 0 0 8px 0;
                 font-size: 13px;
                 color: var(--text-muted);
                 text-transform: uppercase;
-                letter-spacing: 0.05em;
             }}
             .stat-card .value {{
                 font-size: 26px;
                 font-weight: bold;
                 color: #fff;
-            }}
-            .stat-card i {{
-                position: absolute;
-                right: 20px;
-                top: 20px;
-                font-size: 24px;
-                color: rgba(56, 189, 248, 0.2);
             }}
             .dashboard-grid {{
                 display: grid;
@@ -765,7 +755,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 align-items: center;
                 gap: 10px;
             }}
-            #map, #map-expanded {{
+            #map {{
                 height: 380px;
                 width: 100%;
                 border-radius: 8px;
@@ -793,40 +783,13 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 font-weight: 600;
                 background-color: rgba(0,0,0,0.2);
             }}
-            .status-dot {{
-                height: 8px;
-                width: 8px;
-                border-radius: 50%;
-                display: inline-block;
-            }}
-            .progress-bar-container {{
-                background-color: var(--border-color);
-                border-radius: 4px;
-                height: 8px;
-                width: 100%;
-                margin-top: 8px;
-                overflow: hidden;
-            }}
-            .progress-bar {{
-                background-color: var(--accent-blue);
-                height: 100%;
-                width: 100%;
-            }}
-            footer {{
-                text-align: center;
-                padding: 15px;
-                color: var(--text-muted);
-                font-size: 12px;
-                border-top: 1px solid var(--border-color);
-                background-color: var(--bg-sidebar);
-            }}
         </style>
     </head>
     <body>
         <aside>
             <div class="logo-area">
                 <i class="fa-solid fa-robot"></i>
-                <h2>SERVIDOR IA</h2>
+                <h2>QUANTUM MT5</h2>
             </div>
             <div class="menu-item active" onclick="switchTab('visao-geral', this)"><i class="fa-solid fa-chart-pie"></i> Visão Geral</div>
             <div class="menu-item" onclick="switchTab('relatorios', this)"><i class="fa-solid fa-file-invoice-dollar"></i> Relatórios</div>
@@ -839,7 +802,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
             <header>
                 <div class="header-title">
                     <h1 id="header-title-text">Painel de Monitoramento</h1>
-                    <p id="header-subtitle-text">Gestão de Licenças e Créditos em Tempo Real (Admin: {admin})</p>
+                    <p id="header-subtitle-text">Gestão de Licenças e Automação Pix (Admin: {admin})</p>
                 </div>
                 <div class="header-right">
                     <div class="badge-online">ONLINE</div>
@@ -856,22 +819,18 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                         <div class="stat-card">
                             <h3>Licenças Ativas</h3>
                             <div class="value">{total_verif}</div>
-                            <i class="fa-solid fa-shield-halved"></i>
                         </div>
                         <div class="stat-card">
-                            <h3>Experiências Recebidas</h3>
+                            <h3>Experiências IA</h3>
                             <div class="value">{total_exp}</div>
-                            <i class="fa-solid fa-flask"></i>
                         </div>
                         <div class="stat-card">
-                            <h3>IPs Únicos Conectados</h3>
+                            <h3>IPs Únicos</h3>
                             <div class="value">{total_ips}</div>
-                            <i class="fa-solid fa-users"></i>
                         </div>
                         <div class="stat-card">
-                            <h3>Status do Servidor</h3>
-                            <div class="value" style="color: var(--accent-green); font-size: 22px; padding-top: 4px;">OPERACIONAL</div>
-                            <i class="fa-solid fa-server"></i>
+                            <h3>Servidor</h3>
+                            <div class="value" style="color: var(--accent-green); font-size: 20px; padding-top: 4px;">AUTOMATIZADO</div>
                         </div>
                     </div>
 
@@ -882,42 +841,10 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                         </div>
                         
                         <div class="panel">
-                            <h2><i class="fa-solid fa-chart-bar" style="color: var(--accent-blue);"></i> Distribuição por País</h2>
-                            <div style="margin-top: 10px;">
-                                <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 5px;">
-                                    <span>🇧🇷 Brasil</span>
-                                    <span style="font-weight: bold;">100%</span>
-                                </div>
-                                <div class="progress-bar-container">
-                                    <div class="progress-bar"></div>
-                                </div>
+                            <h2><i class="fa-solid fa-chart-line" style="color: var(--accent-blue);"></i> Desempenho (Lucro por Utilizador)</h2>
+                            <div style="position: relative; height: 320px; width: 100%;">
+                                <canvas id="profitChart"></canvas>
                             </div>
-                            <div style="margin-top: 25px;">
-                                <h3 style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase;">Versão da API</h3>
-                                <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
-                                    <span>API v3.9 (Sincronização de Histórico)</span>
-                                    <span style="color: var(--accent-green); font-weight: bold;">Ativo</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="panel">
-                        <h2><i class="fa-solid fa-clock-rotate-left" style="color: var(--accent-blue);"></i> Conexões Recentes</h2>
-                        <div class="table-wrapper">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>País</th>
-                                        <th>Localização</th>
-                                        <th>Status</th>
-                                        <th>Horário</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {ultimas_conexoes_html if ultimas_conexoes_html else '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">A aguardar conexões...</td></tr>'}
-                                </tbody>
-                            </table>
                         </div>
                     </div>
                 </div>
@@ -925,7 +852,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 <!-- ABA 2: RELATÓRIOS -->
                 <div id="relatorios" class="tab-content">
                     <div class="panel">
-                        <h2><i class="fa-solid fa-file-invoice-dollar" style="color: var(--accent-blue);"></i> Relatório Confidencial de Desempenho por Utilizador</h2>
+                        <h2><i class="fa-solid fa-file-invoice-dollar" style="color: var(--accent-blue);"></i> Relatório Confidencial de Desempenho</h2>
                         <div class="table-wrapper" style="margin-top: 10px;">
                             <table>
                                 <thead>
@@ -938,7 +865,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {linhas_relatorios_html if linhas_relatorios_html else '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">Nenhum dado de relatório recebido ainda.</td></tr>'}
+                                    {linhas_relatorios_html if linhas_relatorios_html else '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">Nenhum dado de relatório recebido.</td></tr>'}
                                 </tbody>
                             </table>
                         </div>
@@ -948,10 +875,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 <!-- ABA 3: FINANCEIRO & CRÉDITOS -->
                 <div id="financeiro" class="tab-content">
                     <div class="panel">
-                        <h2><i class="fa-solid fa-wallet" style="color: var(--accent-blue);"></i> Controlo Financeiro, Carteira Pré-Paga e Comissão (5%)</h2>
-                        <p style="color: var(--text-muted); font-size: 13px; margin-top: -5px; margin-bottom: 15px;">
-                            Acompanhe o saldo pré-pago de cada cliente e o valor acumulado das comissões descontadas automaticamente a cada lucro.
-                        </p>
+                        <h2><i class="fa-solid fa-wallet" style="color: var(--accent-blue);"></i> Carteira Pré-Paga, Inadimplência e Comissões (5%)</h2>
                         <div class="table-wrapper">
                             <table>
                                 <thead>
@@ -964,7 +888,7 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {linhas_financeiro_html if linhas_financeiro_html else '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">Nenhum utilizador financeiro registado.</td></tr>'}
+                                    {linhas_financeiro_html if linhas_financeiro_html else '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">Nenhum utilizador registado.</td></tr>'}
                                 </tbody>
                             </table>
                         </div>
@@ -974,15 +898,15 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                 <!-- ABA 4: MAPA MUNDIAL -->
                 <div id="mapa" class="tab-content">
                     <div class="panel">
-                        <h2><i class="fa-solid fa-globe" style="color: var(--accent-blue);"></i> Mapa Mundial de Conexões Ativas</h2>
-                        <div id="map-expanded"></div>
+                        <h2><i class="fa-solid fa-globe" style="color: var(--accent-blue);"></i> Mapa Mundial Expandido</h2>
+                        <div id="map-expanded" style="height: 450px; width: 100%; border-radius: 8px;"></div>
                     </div>
                 </div>
 
                 <!-- ABA 5: CONEXÕES -->
                 <div id="conexoes" class="tab-content">
                     <div class="panel">
-                        <h2><i class="fa-solid fa-network-wired" style="color: var(--accent-blue);"></i> Histórico Completo de Conexões e IPs</h2>
+                        <h2><i class="fa-solid fa-network-wired" style="color: var(--accent-blue);"></i> Histórico Completo de Conexões</h2>
                         <div class="table-wrapper">
                             <table>
                                 <thead>
@@ -990,11 +914,11 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
                                         <th>País</th>
                                         <th>Localização & IP</th>
                                         <th>Status</th>
-                                        <th>Último Contacto</th>
+                                        <th>Horário</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {ultimas_conexoes_html if ultimas_conexoes_html else '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">Sem conexões registadas.</td></tr>'}
+                                    {ultimas_conexoes_html if ultimas_conexoes_html else '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">Sem conexões.</td></tr>'}
                                 </tbody>
                             </table>
                         </div>
@@ -1018,48 +942,48 @@ def obter_estatisticas(admin: str = Depends(verificar_admin)):
             }}
 
             const map = L.map('map').setView([{centro_lat}, {centro_lon}], 4);
-            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                maxZoom: 18,
-                attribution: '&copy; OpenStreetMap'
-            }}).addTo(map);
-
-            const mapExp = L.map('map-expanded').setView([{centro_lat}, {centro_lon}], 4);
-            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                maxZoom: 18,
-                attribution: '&copy; OpenStreetMap'
-            }}).addTo(mapExp);
-
+            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{ maxZoom: 18 }}).addTo(map);
             {marcadores_js}
-            
-            setTimeout(() => {{
-                mapExp.invalidateSize();
-            }}, 300);
+
+            const ctx = document.getElementById('profitChart').getContext('2d');
+            new Chart(ctx, {{
+                type: 'bar',
+                data: {{
+                    labels: {nomes_utilizadores_js},
+                    datasets: [{{
+                        label: 'Lucro Líquido (R$)',
+                        data: {lucros_utilizadores_js},
+                        backgroundColor: '#38bdf8',
+                        borderColor: '#0284c7',
+                        borderWidth: 1,
+                        borderRadius: 4
+                    }}]
+                }},
+                options: {{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {{ legend: {{ labels: {{ color: '#f8fafc' }} }} }},
+                    scales: {{
+                        x: {{ ticks: {{ color: '#94a3b8' }}, grid: {{ color: '#1e294b' }} }},
+                        y: {{ ticks: {{ color: '#94a3b8' }}, grid: {{ color: '#1e294b' }} }}
+                    }}
+                }}
+            }});
 
             async function adicionarCredito(usuario) {{
-                const valorStr = prompt(`Digite o valor de crédito (R$) a adicionar para o utilizador ${{usuario}}:`, "50.0");
+                const valorStr = prompt(`Adicionar crédito (R$) para ${{usuario}}:`, "50.0");
                 if (!valorStr) return;
                 const valor = parseFloat(valorStr);
-                if (isNaN(valor) || valor <= 0) {{
-                    alert("Valor inválido.");
-                    return;
-                }}
+                if (isNaN(valor)) return;
 
-                try {{
-                    const response = await fetch('/api/v1/admin/adicionar-credito', {{
-                        method: 'POST',
-                        headers: {{ 'Content-Type': 'application/json' }},
-                        body: JSON.stringify({{ usuario: usuario, valor: valor }})
-                    }});
-                    const res = await response.json();
-                    if(response.ok) {{
-                        alert(res.mensagem);
-                        location.reload();
-                    }} else {{
-                        alert("Erro: " + (res.detail || "Erro desconhecido"));
-                    }}
-                }} catch(e) {{
-                    alert("Erro de conexão com o servidor.");
-                }}
+                const response = await fetch('/api/v1/admin/adicionar-credito', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ usuario: usuario, valor: valor }})
+                }});
+                const res = await response.json();
+                alert(res.mensagem);
+                location.reload();
             }}
         </script>
     </body>
