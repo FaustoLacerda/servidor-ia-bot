@@ -31,11 +31,13 @@ ADMIN_PASS = "R@oyal0987"
 DB_FILE = "dados_servidor.json"
 RELATORIOS_FILE = "dados_relatorios.json"
 
+# --- CONFIGURAÇÕES DE SMTP PARA ENVIO DE E-MAIL REAL ---
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 SMTP_EMAIL = os.environ.get("SMTP_EMAIL", "seu-email@gmail.com")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "xxxx xxxx xxxx xxxx")
 
+# Dicionário temporário para armazenar códigos OTP
 otp_database = {}
 
 def enviar_email_otp(to_email: str, code: str):
@@ -232,8 +234,14 @@ async def verificar_licenca(request: Request):
             dados = await request.json()
         except Exception:
             pass
+    if not dados:
+        try:
+            form_data = await request.form()
+            dados = dict(form_data)
+        except Exception:
+            pass
 
-    usuario = dados.get("usuario") or dados.get("user") or "Adm_adm"
+    usuario = dados.get("usuario") or dados.get("Usuario") or dados.get("user") or "Adm_adm"
     licenca = dados.get("licenca") or ""
 
     if licenca and licenca != "PROD-ADM-2026":
@@ -255,6 +263,14 @@ async def verificar_licenca(request: Request):
         salvar_relatorios()
 
     user_info = relatorios_usuarios[usuario]
+
+    if user_info.get("saldo_creditos", 0.0) < 0:
+        user_info["status_robo"] = "BLOQUEADO"
+        salvar_relatorios()
+        raise HTTPException(
+            status_code=403,
+            detail="Robô bloqueado por saldo insuficiente ou inadimplência. Contacte o suporte.",
+        )
 
     ip_bruto = request.headers.get("x-forwarded-for")
     if not ip_bruto and request.client:
@@ -284,6 +300,150 @@ async def verificar_licenca(request: Request):
         "estado_robo": user_info.get("status_robo", "ATIVO"),
         "saldo_creditos": user_info.get("saldo_creditos", 0.0),
         "mensagem": "Licença validada com sucesso",
+    }
+
+@app.api_route("/api/v1/heartbeat", methods=["POST", "GET"])
+async def heartbeat_robo(request: Request):
+    dados = {}
+    if request.query_params:
+        dados = dict(request.query_params)
+    if not dados:
+        try:
+            dados = await request.json()
+        except Exception:
+            pass
+
+    usuario = dados.get("usuario") or dados.get("user") or "Robo_Ativo"
+
+    if usuario not in relatorios_usuarios:
+        relatorios_usuarios[usuario] = {
+            "usuario": usuario,
+            "lucro_total": 0.0,
+            "prejuizo_total": 0.0,
+            "operacoes_vencedoras": 0,
+            "operacoes_perdedoras": 0,
+            "banca_atual": 0.0,
+            "saldo_creditos": 50.00,
+            "comissao_devida": 0.0,
+            "status_robo": "ATIVO",
+            "ultima_atualizacao": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        salvar_relatorios()
+
+    user_info = relatorios_usuarios[usuario]
+    status_atual = user_info.get("status_robo", "ATIVO")
+
+    if user_info.get("saldo_creditos", 0.0) < 0:
+        status_atual = "BLOQUEADO"
+        user_info["status_robo"] = "BLOQUEADO"
+        salvar_relatorios()
+
+    return {
+        "status": "online",
+        "estado_robo": status_atual,
+        "saldo_creditos": user_info.get("saldo_creditos", 0.0),
+        "mensagem": "Heartbeat recebido",
+    }
+
+@app.api_route("/api/v1/experiencia", methods=["GET", "POST"])
+async def registrar_experiencia(request: Request):
+    stats_data["total_experiencias_enviadas"] += 1
+    salvar_dados()
+    return {"status": "registrado", "mensagem": "Experiência absorvida."}
+
+@app.api_route("/api/v1/relatorio-usuario", methods=["POST"])
+async def receber_relatorio_usuario(request: Request):
+    try:
+        dados = await request.json()
+    except Exception:
+        dados = {}
+
+    licenca = dados.get("licenca") or ""
+    senha = dados.get("senha") or ""
+    usuario = dados.get("usuario") or ""
+
+    if not usuario or licenca != "PROD-ADM-2026" or senha != "09870987":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Acesso negado. Credenciais ou licença inválidas.",
+        )
+
+    lucro = float(dados.get("lucro", 0.0))
+    banca = float(dados.get("banca", 0.0))
+
+    vitorias = dados.get("vitorias")
+    derrotas = dados.get("derrotas")
+    lucro_total_acomp = dados.get("lucro_total")
+    prejuizo_total_acomp = dados.get("prejuizo_total")
+
+    if usuario not in relatorios_usuarios:
+        relatorios_usuarios[usuario] = {
+            "usuario": usuario,
+            "lucro_total": 0.0,
+            "prejuizo_total": 0.0,
+            "operacoes_vencedoras": 0,
+            "operacoes_perdedoras": 0,
+            "banca_atual": banca,
+            "saldo_creditos": 50.00,
+            "comissao_devida": 0.0,
+            "status_robo": "ATIVO",
+            "ultima_atualizacao": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+    user_data = relatorios_usuarios[usuario]
+    user_data["banca_atual"] = banca if banca > 0 else user_data.get("banca_atual", 0.0)
+    user_data["ultima_atualizacao"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if vitorias is not None and derrotas is not None and lucro_total_acomp is not None:
+        user_data["operacoes_vencedoras"] = int(vitorias)
+        user_data["operacoes_perdedoras"] = int(derrotas)
+        user_data["lucro_total"] = float(lucro_total_acomp)
+        user_data["prejuizo_total"] = float(prejuizo_total_acomp)
+    else:
+        if lucro >= 0:
+            user_data["lucro_total"] += lucro
+            if lucro > 0:
+                user_data["operacoes_vencedoras"] += 1
+        else:
+            user_data["prejuizo_total"] += abs(lucro)
+            user_data["operacoes_perdedoras"] += 1
+
+    lucro_liq_atual = user_data["lucro_total"] - user_data["prejuizo_total"]
+    if lucro_liq_atual > 0:
+        user_data["comissao_devida"] = lucro_liq_atual * 0.05
+
+    salvar_relatorios()
+    return {
+        "status": "sucesso",
+        "mensagem": "Relatório processado com sucesso",
+        "saldo_creditos_atual": user_data["saldo_creditos"],
+        "status_robo": user_data["status_robo"],
+    }
+
+@app.post("/api/v1/admin/adicionar-credito")
+async def adicionar_credito(request: Request, admin: str = Depends(verificar_admin)):
+    try:
+        dados = await request.json()
+    except Exception:
+        dados = {}
+
+    usuario = dados.get("usuario")
+    valor = float(dados.get("valor", 0.0))
+
+    if not usuario or usuario not in relatorios_usuarios:
+        raise HTTPException(status_code=404, detail="Utilizador não encontrado.")
+
+    user_data = relatorios_usuarios[usuario]
+    user_data["saldo_creditos"] = user_data.get("saldo_creditos", 0.0) + valor
+
+    if user_data["saldo_creditos"] >= 0 and user_data["status_robo"] == "BLOQUEADO":
+        user_data["status_robo"] = "ATIVO"
+
+    salvar_relatorios()
+    return {
+        "status": "sucesso",
+        "mensagem": f"Créditos adicionados com sucesso para {usuario}.",
+        "novo_saldo": user_data["saldo_creditos"],
     }
 
 @app.get("/admin/estatisticas")
