@@ -479,7 +479,7 @@ async def admin_alterar_saldo(request: Request, admin: str = Depends(verificar_a
         return {"status": "sucesso"}
     raise HTTPException(status_code=404, detail="Utilizador não encontrado")
 
-@app.get("/api/v1/stats", response_class=HTMLResponse)
+@app.api_route("/api/v1/stats", methods=["GET", "HEAD"], response_class=HTMLResponse)
 def obter_estatisticas(admin: str = Depends(verificar_admin)):
     ultimas_conexoes_html = ""
     marcadores_js = ""
